@@ -96,7 +96,7 @@ URL_DADOS = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADO
 def carregar_dados_processados():
     try:
         # Carregar o arquivo diretamente do GitHub
-        df = pd.read_excel(URL_DADOS, sheet_name='DADOS_PREDITIVA')
+        df = pd.read_excel(URL_DADOS, sheet_name='DADOS PREDITIVA')
     except Exception as e:
         st.error(f"Erro ao carregar dados: {e}")
         return pd.DataFrame()
