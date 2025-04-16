@@ -1,0 +1,13 @@
+prefix=h:/Meu Drive/Kidy/PREDITIVA/.conda/Library
+exec_prefix=h:/Meu Drive/Kidy/PREDITIVA/.conda/Library
+libdir=h:/Meu Drive/Kidy/PREDITIVA/.conda/Library/lib
+sharedlibdir=h:/Meu Drive/Kidy/PREDITIVA/.conda/Library/lib
+includedir=h:/Meu Drive/Kidy/PREDITIVA/.conda/Library/include
+
+Name: zlib
+Description: zlib compression library
+Version: 1.2.13
+
+Requires:
+Libs: -L${libdir} -L${sharedlibdir} -lz
+Cflags: -I${includedir}

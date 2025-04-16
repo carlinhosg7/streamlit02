@@ -1,0 +1,478 @@
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+from datetime import datetime
+from fpdf import FPDF
+import tempfile
+import os
+from PIL import Image
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import accuracy_score
+import time
+
+# ✅ CONFIGURAÇÃO DA PÁGINA
+st.set_page_config(
+    page_title="Dashboard Preditivo Kidy",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ✅ CSS CUSTOMIZADO
+def add_custom_css():
+    st.markdown("""
+        <style>
+        div.stButton > button:first-child {
+            background-color: #E60012;
+            color: white;
+            border-radius: 8px;
+            height: 3em;
+            width: 100%;
+            font-weight: bold;
+            border: none;
+        }
+        div.stButton > button:hover {
+            background-color: #A3000B;
+            color: #ffffff;
+        }
+        footer {visibility: hidden;}
+        div[data-testid="metric-container"] label {
+            font-size: 12px !important;
+        }
+        div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
+            font-size: 16px !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+add_custom_css()
+
+# ✅ LOGO NO TOPO
+logo_kidy = Image.open("logo_kidy.png")
+st.image(logo_kidy, width=100)
+
+# ✅ DICIONÁRIO DE MESES
+meses_portugues = {
+    1: 'Janeiro', 2: 'Fevereiro', 3: 'Março', 4: 'Abril',
+    5: 'Maio', 6: 'Junho', 7: 'Julho', 8: 'Agosto',
+    9: 'Setembro', 10: 'Outubro', 11: 'Novembro', 12: 'Dezembro'
+}
+
+# ✅ FUNÇÃO PARA CARREGAR DADOS
+@st.cache_resource(ttl=3600)
+def carregar_dados_processados():
+    try:
+        file_path = r"C:/Kidy/PREDITIVA/DADOS_PREDITIVA.xlsx"
+        df = pd.read_excel(file_path, sheet_name='DADOS PREDITIVA')
+    except Exception as e:
+        st.error(f"Erro ao carregar dados: {e}")
+        return pd.DataFrame()
+
+    df['Codigo Grupo Cliente'] = df['Codigo Grupo Cliente'].astype(str).str.upper()
+    df['Codigo Cliente'] = df['Codigo Cliente'].astype(str).str.upper()
+    df['Data Cadastro'] = pd.to_datetime(df['Data Cadastro'], errors='coerce')
+    df['Data Ultima Compra'] = pd.to_datetime(df['Data Ultima Compra'], errors='coerce')
+    df['Preço Médio Produto'] = df.apply(lambda row: row['Vlr Venda'] / row['Qtd Venda'] if row['Qtd Venda'] > 0 else 0, axis=1)
+    return df
+
+# ✅ FUNÇÃO RFV INDIVIDUAL COM SCORE
+def calcular_rfv_individual(dados_filtrados):
+    hoje = datetime.today()
+
+    recencia = (hoje - dados_filtrados['Data Ultima Compra'].max()).days if pd.notnull(dados_filtrados['Data Ultima Compra'].max()) else 999
+    frequencia = dados_filtrados['Data Cadastro'].nunique()
+    valor = dados_filtrados['Vlr Venda'].sum()
+
+    recencia_score = 5 if recencia <= 30 else 4 if recencia <= 90 else 3 if recencia <= 180 else 2 if recencia <= 365 else 1
+    frequencia_score = 5 if frequencia >= 12 else 4 if frequencia >= 6 else 3 if frequencia >= 3 else 2 if frequencia >= 1 else 1
+    valor_score = 5 if valor >= 50000 else 4 if valor >= 20000 else 3 if valor >= 10000 else 2 if valor >= 5000 else 1
+
+    rfv_score = f"{recencia_score}{frequencia_score}{valor_score}"
+
+    if rfv_score == '555':
+        classificacao = 'Cliente VIP'
+    elif recencia_score >= 4 and frequencia_score >= 4:
+        classificacao = 'Cliente Leal'
+    elif recencia_score >= 3:
+        classificacao = 'Cliente Potencial'
+    else:
+        classificacao = 'Cliente em Risco'
+
+    return {
+        'Recência (dias)': recencia,
+        'Frequência (pedidos únicos)': frequencia,
+        'Valor Total (R$)': f"{valor:,.2f}",
+        'RFV Score': rfv_score,
+        'Classificação': classificacao
+    }
+
+# ✅ CARREGAR OS DADOS
+df = carregar_dados_processados()
+
+if df.empty:
+    st.stop()
+
+# ✅ SIDEBAR FILTROS
+st.title("📊 Dashboard de Análise Preditiva - Grupo de Clientes / Clientes - Kidy")
+st.sidebar.image(logo_kidy, width=100)
+st.sidebar.header("🔧 Filtros de Análise")
+
+codigo_grupo_cliente = st.sidebar.text_input("Código do Grupo de Cliente (Opcional):").strip().upper()
+codigo_cliente = st.sidebar.text_input("Código do Cliente (Opcional):").strip().upper()
+
+data_min = df['Data Cadastro'].min().date()
+data_max = df['Data Cadastro'].max().date()
+
+periodo = st.sidebar.date_input(
+    "Período da análise:",
+    value=(data_min, data_max),
+    min_value=data_min,
+    max_value=data_max
+)
+
+
+if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
+
+    if not codigo_grupo_cliente and not codigo_cliente:
+        st.sidebar.warning("⚠️ Informe pelo menos um código!")
+    else:
+        with st.spinner('🔎 Analisando dados...'):
+
+            dados_filtrados = df.copy()
+
+            if codigo_cliente:
+                dados_filtrados = dados_filtrados[dados_filtrados['Codigo Cliente'] == codigo_cliente]
+            elif codigo_grupo_cliente:
+                dados_filtrados = dados_filtrados[dados_filtrados['Codigo Grupo Cliente'] == codigo_grupo_cliente]
+
+            dados_filtrados = dados_filtrados[
+                (dados_filtrados['Data Cadastro'] >= pd.to_datetime(periodo[0])) &
+                (dados_filtrados['Data Cadastro'] <= pd.to_datetime(periodo[1]))
+            ]
+
+            if dados_filtrados.empty:
+                st.warning("⚠️ Nenhum dado encontrado no período!")
+            else:
+                dados_filtrados['Ano'] = dados_filtrados['Data Cadastro'].dt.year
+
+                nome_grupo = dados_filtrados['Grupo Cliente'].iloc[0]
+                quantidade_lojas = dados_filtrados['Codigo Cliente'].nunique()
+
+                # ✅ TÍTULO COM LOJAS
+                st.markdown(f"### 📌 Grupo Cliente: {nome_grupo} | 🏬 Lojas (CNPJs): {quantidade_lojas}")
+
+                # ✅ RFV
+                st.subheader("📋 Análise RFV do Cliente/Grupo Selecionado")
+                rfv_resultado = calcular_rfv_individual(dados_filtrados)
+
+                colrfv1, colrfv2, colrfv3, colrfv4, colrfv5 = st.columns(5)
+
+                with colrfv1:
+                    st.markdown(f"<div style='font-size:12px;'>Recência (dias)</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:20px; font-weight:bold;'>{rfv_resultado['Recência (dias)']}</div>", unsafe_allow_html=True)
+
+                with colrfv2:
+                    st.markdown(f"<div style='font-size:12px;'>Frequência</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:20px; font-weight:bold;'>{rfv_resultado['Frequência (pedidos únicos)']}</div>", unsafe_allow_html=True)
+
+                with colrfv3:
+                    st.markdown(f"<div style='font-size:12px;'>Valor Total (R$)</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:20px; font-weight:bold;'>{rfv_resultado['Valor Total (R$)']}</div>", unsafe_allow_html=True)
+
+                with colrfv4:
+                    st.markdown(f"<div style='font-size:12px;'>RFV Score</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:20px; font-weight:bold;'>{rfv_resultado['RFV Score']}</div>", unsafe_allow_html=True)
+
+                with colrfv5:
+                    st.markdown(f"<div style='font-size:12px;'>Classificação</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:20px; font-weight:bold;'>{rfv_resultado['Classificação']}</div>", unsafe_allow_html=True)
+
+                hoje = pd.to_datetime(datetime.today().date())
+                ultima_data_compra = dados_filtrados['Data Ultima Compra'].max()
+                ultima_compra = ultima_data_compra.strftime('%d/%m/%Y') if pd.notnull(ultima_data_compra) else 'Sem compras registradas'
+
+                primeira_data = dados_filtrados['Data Cadastro'].min()
+                ultima_data = dados_filtrados['Data Cadastro'].max()
+                periodo_analise = f"{primeira_data.strftime('%d/%m/%Y')} até {ultima_data.strftime('%d/%m/%Y')}"
+
+                vendas_totais = dados_filtrados['Qtd Venda'].sum()
+
+                dados_filtrados['Mes Pedido'] = dados_filtrados['Data Cadastro'].dt.month
+                melhor_mes_num = dados_filtrados['Mes Pedido'].mode()[0]
+                melhor_mes_nome = meses_portugues.get(melhor_mes_num, 'Mês inválido')
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.markdown(f"<div style='font-size:12px;'>📅 Última Compra</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:16px;'><b>{ultima_compra}</b></div>", unsafe_allow_html=True)
+                with col2:
+                    st.markdown(f"<div style='font-size:12px;'>🕒 Período da Análise</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:16px;'><b>{periodo_analise}</b></div>", unsafe_allow_html=True)
+                with col3:
+                    st.markdown(f"<div style='font-size:12px;'>📈 Melhor Mês para Oferta</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:16px;'><b>{melhor_mes_nome}</b></div>", unsafe_allow_html=True)
+
+                st.success(f"📦 Total de Itens Vendidos: {vendas_totais:,} unidades")
+                
+                # ✅ TABELA COMPARATIVA DE SEMESTRES
+                hoje = pd.to_datetime(datetime.today())
+                semestre_1_ini = hoje - pd.DateOffset(months=6)
+                semestre_2_ini = hoje - pd.DateOffset(months=12)
+                semestre_2_fim = semestre_1_ini - pd.Timedelta(days=1)
+
+                vendas_semestre_1 = dados_filtrados[(dados_filtrados['Data Cadastro'] >= semestre_1_ini) & (dados_filtrados['Data Cadastro'] <= hoje)]['Qtd Venda'].sum()
+                vendas_semestre_2 = dados_filtrados[(dados_filtrados['Data Cadastro'] >= semestre_2_ini) & (dados_filtrados['Data Cadastro'] <= semestre_2_fim)]['Qtd Venda'].sum()
+
+                df_semestres = pd.DataFrame({
+                    'Período': ['Último Semestre', 'Penúltimo Semestre'],
+                    'Quantidade Vendida': [vendas_semestre_1, vendas_semestre_2]
+                })
+
+                st.markdown("📆 **Vendas por Semestre (comparativo):**")
+                st.table(df_semestres)
+
+                # ✅ Top Linhas
+                total_vendas_linha = dados_filtrados.groupby(['Codigo Linha', 'Linha'])['Qtd Venda'].sum().reset_index(name='Quantidade Vendida')
+                top_linhas = total_vendas_linha.sort_values(by='Quantidade Vendida', ascending=False).head(10)
+
+                st.markdown("👉 **🔮 Top 10 Linhas Preditivas para Ofertar:**")
+                st.table(top_linhas)
+
+                fig_top_linhas = px.bar(top_linhas, x='Linha', y='Quantidade Vendida', color='Linha', text='Quantidade Vendida', title='🎯 Top 10 Linhas Mais Vendidas')
+                fig_top_linhas.update_traces(textposition='outside')
+                st.plotly_chart(fig_top_linhas)
+
+                # ✅ MACHINE LEARNING
+                st.subheader("🤖 Previsão de Linhas para Oferta (Machine Learning)")
+                progress_bar = st.progress(0, text="🔄 Preparando dados para o modelo...")
+
+                dados_ml = df.copy()
+                dados_ml['Mes Pedido'] = dados_ml['Data Cadastro'].dt.month
+                dados_ml['Compra'] = dados_ml['Qtd Venda'].apply(lambda x: 1 if x > 0 else 0)
+
+                le_grupo = LabelEncoder().fit(dados_ml['Codigo Grupo Cliente'])
+                le_cliente = LabelEncoder().fit(dados_ml['Codigo Cliente'])
+                le_linha = LabelEncoder().fit(dados_ml['Linha'])
+
+                dados_ml['Grupo_Code'] = le_grupo.transform(dados_ml['Codigo Grupo Cliente'])
+                dados_ml['Cliente_Code'] = le_cliente.transform(dados_ml['Codigo Cliente'])
+                dados_ml['Linha_Code'] = le_linha.transform(dados_ml['Linha'])
+
+                X = dados_ml[['Grupo_Code', 'Cliente_Code', 'Linha_Code', 'Mes Pedido']]
+                y = dados_ml['Compra']
+
+                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+                modelo_rf = RandomForestClassifier(n_estimators=100, random_state=42)
+                modelo_rf.fit(X_train, y_train)
+
+                acc = accuracy_score(y_test, modelo_rf.predict(X_test))
+                st.info(f"🔎 Acurácia do Modelo: {acc:.2%}")
+
+                grupo_id = codigo_grupo_cliente or dados_filtrados['Codigo Grupo Cliente'].iloc[0]
+                cliente_id = codigo_cliente or dados_filtrados['Codigo Cliente'].iloc[0]
+
+                linhas_possiveis = df['Linha'].unique()
+                mes_atual = datetime.now().month
+
+                dados_para_prever = pd.DataFrame({
+                    'Grupo_Code': le_grupo.transform([grupo_id] * len(linhas_possiveis)),
+                    'Cliente_Code': le_cliente.transform([cliente_id] * len(linhas_possiveis)),
+                    'Linha_Code': le_linha.transform(linhas_possiveis),
+                    'Mes Pedido': [mes_atual] * len(linhas_possiveis)
+                })
+
+                probs = modelo_rf.predict_proba(dados_para_prever)[:, 1]
+
+                df_preds = pd.DataFrame({
+                    'Linha': linhas_possiveis,
+                    'Probabilidade de Compra': probs
+                }).sort_values(by='Probabilidade de Compra', ascending=False)
+
+                st.markdown("👉 **🔮 Linhas Recomendadas (Machine Learning):**")
+                st.table(df_preds.head(10))
+
+                # ✅ GRÁFICOS ANALÍTICOS
+            st.subheader("📊 Gráficos Analíticos do Período Selecionado")
+
+            # Gráficos por ano
+            fig1 = px.bar(
+                dados_filtrados.groupby('Ano')['Qtd Venda'].sum().reset_index(),
+                x='Ano', y='Qtd Venda', color='Ano', text='Qtd Venda',
+                title="📦 Quantidade de Pares Vendida por Ano"
+            )
+
+            fig2 = px.bar(
+                dados_filtrados.groupby('Ano')['Codigo Cliente'].nunique().reset_index(name='Quantidade de Pedidos'),
+                x='Ano', y='Quantidade de Pedidos', color='Ano', text='Quantidade de Pedidos',
+                title="📝 Quantidade de Pedidos por Ano"
+            )
+
+            fig3 = px.bar(
+                dados_filtrados.groupby('Ano')['Preço Médio Produto'].mean().reset_index(),
+                x='Ano', y='Preço Médio Produto', color='Ano', text='Preço Médio Produto',
+                title="💰 Preço Médio dos Produtos por Ano"
+            )
+
+            fig4 = px.bar(
+                dados_filtrados.groupby('Ano')['Vlr Venda'].sum().reset_index(),
+                x='Ano', y='Vlr Venda', color='Ano', text='Vlr Venda',
+                title="💸 Valores Vendidos por Ano"
+            )
+
+            # Top 10 linhas do período
+            top10_periodo = dados_filtrados.groupby('Linha')['Qtd Venda'].sum().reset_index().sort_values(by='Qtd Venda', ascending=False).head(10)
+
+            fig5 = px.bar(
+                top10_periodo,
+                x='Linha', y='Qtd Venda', color='Linha', text='Qtd Venda',
+                title="🏆 Top 10 Linhas Mais Vendidas no Período"
+            )
+
+            # ✅ Gráfico de Prazo Médio por Ano (usando a coluna 'Prazo Medio')
+            fig_prazo_ano = None
+            if 'Prazo Medio' in dados_filtrados.columns:
+                try:
+                    dados_filtrados['Prazo Medio'] = pd.to_numeric(dados_filtrados['Prazo Medio'], errors='coerce')
+                    dados_filtrados['Ano Cadastro'] = dados_filtrados['Data Cadastro'].dt.year
+
+                    prazo_medio_ano = dados_filtrados.groupby('Ano Cadastro')['Prazo Medio'].mean().reset_index()
+
+                    fig_prazo_ano = px.bar(
+                        prazo_medio_ano,
+                        x='Ano Cadastro',
+                        y='Prazo Medio',
+                        text='Prazo Medio',
+                        color='Ano Cadastro',
+                        title='⏳ Prazo Médio (dias) por Ano (coluna Prazo Medio)'
+                    )
+
+                except Exception as e:
+                    st.warning(f"Erro ao gerar gráfico de prazo médio: {e}")
+            else:
+                st.warning("⚠️ A coluna 'Prazo Medio' não existe nos dados filtrados.")
+)
+## ✅ SALVAR VARIÁVEIS PARA O PDF NO SESSION_STATE
+st.session_state['nome_grupo'] = nome_grupo
+st.session_state['quantidade_lojas'] = quantidade_lojas
+st.session_state['ultima_compra'] = ultima_compra
+st.session_state['periodo_analise'] = periodo_analise
+st.session_state['melhor_mes_nome'] = melhor_mes_nome
+st.session_state['vendas_totais'] = vendas_totais
+st.session_state['rfv_resultado'] = rfv_resultado
+st.session_state['df_semestres'] = df_semestres
+st.session_state['top_linhas'] = top_linhas
+# graficos será definido mais adiante e salvo depois
+
+                
+
+# ✅ BOTÃO PARA GERAR RELATÓRIO PDF (só aparece após análise)
+if 'nome_grupo' in st.session_state:
+    if st.button("📥 Gerar Relatório PDF"):
+        try:
+            # Recuperar dados da análise
+            nome_grupo = st.session_state['nome_grupo']
+            quantidade_lojas = st.session_state['quantidade_lojas']
+            ultima_compra = st.session_state['ultima_compra']
+            periodo_analise = st.session_state['periodo_analise']
+            melhor_mes_nome = st.session_state['melhor_mes_nome']
+            vendas_totais = st.session_state['vendas_totais']
+            rfv_resultado = st.session_state['rfv_resultado']
+            df_semestres = st.session_state['df_semestres']
+            top_linhas = st.session_state['top_linhas']
+            graficos = st.session_state['graficos']
+
+            with st.spinner("🛠️ Gerando PDF..."):
+
+                pdf = FPDF()
+                pdf.set_auto_page_break(auto=True, margin=15)
+                pdf.add_page()
+
+                # Logo (opcional)
+                logo_path = "logo_kidy.png"
+                if os.path.exists(logo_path):
+                    pdf.image(logo_path, x=10, y=8, w=30)
+                    pdf.ln(20)
+
+                # Cabeçalho
+                pdf.set_font("Arial", 'B', 14)
+                pdf.cell(200, 10, txt="Relatório de Análise Preditiva - Kidy", ln=True, align="C")
+                pdf.ln(5)
+
+                # Informações
+                pdf.set_font("Arial", size=10)
+                pdf.multi_cell(0, 8, f"Grupo Cliente: {nome_grupo}")
+                pdf.multi_cell(0, 8, f"Lojas analisadas: {quantidade_lojas}")
+                pdf.multi_cell(0, 8, f"Última Compra: {ultima_compra}")
+                pdf.multi_cell(0, 8, f"Período da análise: {periodo_analise}")
+                pdf.multi_cell(0, 8, f"Melhor mês para oferta: {melhor_mes_nome}")
+                pdf.multi_cell(0, 8, f"Total de Itens Vendidos: {vendas_totais:,} unidades")
+                pdf.multi_cell(0, 8, f"Classificação RFV: {rfv_resultado['Classificação']} (Score: {rfv_resultado['RFV Score']})")
+                pdf.ln(5)
+
+                # Vendas por semestre
+                pdf.set_font("Arial", 'B', 12)
+                pdf.cell(0, 10, "📆 Vendas por Semestre", ln=True)
+                pdf.set_font("Arial", size=10)
+                for index, row in df_semestres.iterrows():
+                    pdf.cell(0, 8, f"{row['Período']}: {int(row['Quantidade Vendida'])} unidades", ln=True)
+                pdf.ln(5)
+
+                # Top linhas
+                pdf.set_font("Arial", 'B', 12)
+                pdf.cell(0, 10, "🔝 Top 10 Linhas Mais Vendidas", ln=True)
+                pdf.set_font("Arial", size=10)
+                for index, row in top_linhas.iterrows():
+                    linha_nome = str(row['Linha'])
+                    qtd = int(row['Quantidade Vendida'])
+                    pdf.cell(0, 8, f"{linha_nome}: {qtd} unidades", ln=True)
+                pdf.ln(5)
+
+                # Gráficos
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    graficos_validos = 0
+                    for i, fig in enumerate(graficos):
+                        try:
+                            img_path = os.path.join(tmpdir, f"grafico_{i}.png")
+                            fig.write_image(img_path, format="png", engine="kaleido", scale=2)
+                            pdf.add_page()
+                            pdf.image(img_path, x=10, y=20, w=190)
+                            graficos_validos += 1
+                        except Exception as e:
+                            st.warning(f"Erro ao exportar gráfico {i+1}: {e}")
+                            pdf.add_page()
+                            pdf.set_font("Arial", 'I', 10)
+                            pdf.multi_cell(0, 8, f"Erro ao gerar gráfico {i+1}: {str(e)}")
+
+                    if graficos_validos == 0:
+                        pdf.add_page()
+                        pdf.set_font("Arial", 'I', 10)
+                        pdf.cell(0, 10, "⚠️ Nenhum gráfico foi adicionado ao relatório.", ln=True)
+
+                    # Salvar PDF e disponibilizar download
+                    pdf_path = os.path.join(tmpdir, "relatorio_kidy.pdf")
+                    pdf.output(pdf_path)
+
+                    with open(pdf_path, "rb") as f:
+                        st.download_button(
+                            label="📄 Baixar Relatório PDF",
+                            data=f.read(),
+                            file_name="Relatorio_Preditivo_Kidy.pdf",
+                            mime="application/pdf"
+                        )
+
+        except Exception as e:
+            st.error(f"❌ Erro ao gerar o PDF: {e}")
+
+# COLE AQUI:
+st.session_state['nome_grupo'] = nome_grupo
+# ...
+
+
+
+# ✅ RODAPÉ
+st.sidebar.markdown("---")
+st.sidebar.caption(f"Relatório gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+st.sidebar.markdown("Desenvolvido por [Seu Nome]")
