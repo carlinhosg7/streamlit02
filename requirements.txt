@@ -1,7 +1,8 @@
 streamlit
 pandas
 plotly
-numpy
-scikit-learn
 fpdf
+Pillow
+scikit-learn
 kaleido
+numpy
