@@ -12,6 +12,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score
 import time
 import plotly.io as pio
+import kaleido # força o loading do kaleido para evitar erro de importação
 pio.kaleido.scope.default_format = "png"
 import plotly.express as px
 
