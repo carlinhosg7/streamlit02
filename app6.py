@@ -89,28 +89,29 @@ meses_portugues = {
 }
 
 # URL do arquivo no GitHub (modo leitura)
-URL_DADOS = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA.xlsx"
+URL_1 = "https://raw.githubusercontent.com/seuusuario/seurepositorio/main/DADOS_PREDITIVA_1.csv"
+URL_2 = "https://raw.githubusercontent.com/seuusuario/seurepositorio/main/DADOS_PREDITIVA_2.csv"
 
-# Função para carregar dados
-@st.cache_resource(ttl=3600)  # Usando cache para otimizar carregamento
+# CARREGAR DADOS
+@st.cache_data(ttl=3600)
 def carregar_dados_processados():
     try:
-        # Carregar o arquivo diretamente do GitHub
-        df = pd.read_excel(URL_DADOS, sheet_name='DADOS PREDITIVA')
+        df1 = pd.read_csv(URL_1)
+        df2 = pd.read_csv(URL_2)
+        df = pd.concat([df1, df2], ignore_index=True)
+
+        # Conversões e ajustes como antes
+        df['Data Cadastro'] = pd.to_datetime(df['Data Cadastro'], errors='coerce')
+        df['Data Ultima Compra'] = pd.to_datetime(df['Data Ultima Compra'], errors='coerce')
+        df['Codigo Grupo Cliente'] = df['Codigo Grupo Cliente'].astype(str).str.upper()
+        df['Codigo Cliente'] = df['Codigo Cliente'].astype(str).str.upper()
+        df['Preço Médio Produto'] = df.apply(
+            lambda row: row['Vlr Venda'] / row['Qtd Venda'] if row['Qtd Venda'] > 0 else 0, axis=1
+        )
+        return df
     except Exception as e:
         st.error(f"Erro ao carregar dados: {e}")
         return pd.DataFrame()
-
-    # Processamento dos dados
-    df['Codigo Grupo Cliente'] = df['Codigo Grupo Cliente'].astype(str).str.upper()
-    df['Codigo Cliente'] = df['Codigo Cliente'].astype(str).str.upper()
-    df['Data Cadastro'] = pd.to_datetime(df['Data Cadastro'], errors='coerce')
-    df['Data Ultima Compra'] = pd.to_datetime(df['Data Ultima Compra'], errors='coerce')
-    df['Preço Médio Produto'] = df.apply(lambda row: row['Vlr Venda'] / row['Qtd Venda'] if row['Qtd Venda'] > 0 else 0, axis=1)
-    
-    return df
-
-
 
 # RFV SCORE
 def calcular_rfv_individual(dados_filtrados):
