@@ -238,6 +238,62 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                     """, unsafe_allow_html=True)
 
                 st.success(f"📦 Total de Itens Vendidos: {vendas_totais:,} unidades")
+                
+                # --- ANÁLISE DAS 3 ÚLTIMAS COLEÇÕES (INCLUINDO VIGENTE) ---
+                st.markdown("### 👟 Vendas das 3 Últimas Coleções (Pares e Valores)")
+
+                # Função para identificar a coleção
+                def identificar_colecao(data):
+                    if pd.isnull(data):
+                        return None
+                    ano = data.year
+                    if 5 <= data.month <= 10:
+                        return f"Verão {ano}"
+                    elif data.month >= 11:
+                        return f"Inverno {ano + 1}"
+                    else:
+                        return f"Inverno {ano}"
+
+                # Determina a coleção vigente com base na data de hoje
+                hoje = datetime.today()
+                ano = hoje.year
+                mes = hoje.month
+                if 5 <= mes <= 10:
+                    colecao_vigente = f"Verão {ano}"
+                elif mes >= 11:
+                    colecao_vigente = f"Inverno {ano + 1}"
+                else:
+                    colecao_vigente = f"Inverno {ano}"
+
+                # Aplica a classificação de coleção
+                dados_filtrados['Colecao'] = dados_filtrados['Data Cadastro'].apply(identificar_colecao)
+
+                # Agrupamento por coleção
+                vendas_colecao = dados_filtrados.groupby('Colecao').agg({
+                    'Qtd Venda': 'sum',
+                    'Vlr Venda': 'sum'
+                }).reset_index()
+
+                # Ordena por ano extraído
+                vendas_colecao['Ano'] = vendas_colecao['Colecao'].str.extract(r'(\d{4})').astype(int)
+                vendas_colecao = vendas_colecao.sort_values(by='Ano', ascending=False)
+
+                # Garante que a coleção vigente esteja nas 3 últimas
+                colecoes_selecionadas = vendas_colecao.copy()
+                if colecao_vigente not in colecoes_selecionadas['Colecao'].values:
+                    linha_vigente = pd.DataFrame({'Colecao': [colecao_vigente], 'Qtd Venda': [0], 'Vlr Venda': [0.0], 'Ano': [int(colecao_vigente.split()[1])]})
+                    colecoes_selecionadas = pd.concat([linha_vigente, colecoes_selecionadas], ignore_index=True)
+
+                colecoes_exibir = colecoes_selecionadas.drop(columns='Ano').drop_duplicates('Colecao').head(3)
+
+                # Formata para exibição
+                colecoes_exibir.columns = ['Coleção', 'Pares Vendidos', 'Valor Vendido (R$)']
+                colecoes_exibir['Pares Vendidos'] = colecoes_exibir['Pares Vendidos'].astype(int)
+                colecoes_exibir['Valor Vendido (R$)'] = colecoes_exibir['Valor Vendido (R$)'].apply(lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+
+                # Exibe
+                st.table(colecoes_exibir)
+
 
                 # TOP 10 LINHAS
                 total_vendas_linha = dados_filtrados.groupby(['Codigo Linha', 'Linha'])['Qtd Venda'].sum().reset_index(name='Quantidade Vendida')
@@ -298,6 +354,8 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 modelo_rf, le_grupo, le_cliente, le_linha, acc = treinar_modelo_rf(dados_ml)
                 progress_bar.progress(50, text="✅ Etapa 2: Modelo treinado (50%)")
 
+                st.info(f"🧠 Acurácia do modelo: {acc:.2%}")
+                
                 # Etapa 3: Preparar dados para predição
                 grupo_id = codigo_grupo_cliente or dados_filtrados['Codigo Grupo Cliente'].iloc[0]
                 cliente_id = codigo_cliente or dados_filtrados['Codigo Cliente'].iloc[0]
@@ -328,8 +386,6 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 except ValueError as e:
                     st.warning(f"⚠️ Erro ao prever: {e}. Verifique se o código do cliente ou grupo existe nos dados.")
                     progress_bar.progress(0, text="❌ Erro durante a predição.")
-
-
 
                 # GRÁFICOS ANALÍTICOS
                 st.subheader("📊 Gráficos Analíticos do Período Selecionado")
@@ -371,30 +427,45 @@ if st.session_state.get("pdf_ready", False):
         with st.spinner("🧾 Gerando relatório..."):
             st.write("Iniciando a geração do relatório...")
 
-            # Função para salvar gráfico com verificação
+            # Função para salvar gráfico com tema colorido
             def salvar_grafico(fig, nome):
                 import tempfile
                 import os
                 import plotly.io as pio
+                import plotly.graph_objects as go
 
-                st.write(f"Verificando gráfico: {nome}")  # Verificando o gráfico sendo processado
+                st.write(f"Verificando gráfico: {nome}")
 
                 if not fig.data:
                     st.warning(f"⚠️ O gráfico '{nome}' está vazio e não será incluído no relatório.")
                     return None
 
                 try:
+                    # Cria uma nova figura limpa com os mesmos dados
+                    nova_fig = go.Figure(data=fig.data)
+
+                    # Reaplica os eixos e layout com estilo claro e fundo branco
+                    nova_fig.update_layout(
+                        template="plotly_white",
+                        title=fig.layout.title,
+                        xaxis=fig.layout.xaxis,
+                        yaxis=fig.layout.yaxis,
+                        font=dict(color="black", size=14),
+                        paper_bgcolor="white",
+                        plot_bgcolor="white"
+                    )
+
                     caminho = os.path.join(tempfile.gettempdir(), f"{nome}.png")
-                    fig.write_image(caminho, format="png", engine="kaleido", scale=2)
-                    st.write(f"Gráfico {nome} salvo com sucesso!")
+                    nova_fig.write_image(caminho, format="png", engine="kaleido", scale=2)
+                    st.write(f"✅ Gráfico {nome} exportado com sucesso!")
                     return caminho
+
                 except Exception as e:
                     st.error(f"❌ Erro ao salvar gráfico '{nome}': {e}")
                     return None
 
 
             # Início do PDF
-            st.write("Iniciando o processo de criação do PDF...")  # Marca o início do processo do PDF
             pdf = FPDF()
             pdf.set_auto_page_break(auto=True, margin=15)
             pdf.add_page()
@@ -410,6 +481,7 @@ if st.session_state.get("pdf_ready", False):
             pdf.cell(0, 10, f"Última Compra: {st.session_state['ultima_compra']}", ln=True)
             pdf.ln(10)
 
+            # RFV
             pdf.set_font("Arial", "B", 14)
             pdf.cell(0, 10, "Métricas RFV", ln=True)
             pdf.set_font("Arial", size=12)
@@ -417,6 +489,54 @@ if st.session_state.get("pdf_ready", False):
                 pdf.cell(0, 10, f"{key}: {val}", ln=True)
             pdf.ln(10)
 
+            # COLEÇÕES
+            pdf.set_font("Arial", "B", 14)
+            pdf.cell(0, 10, "Vendas das 3 Últimas Coleções", ln=True)
+            pdf.set_font("Arial", size=12)
+
+            df_colecoes = st.session_state['dados_filtrados'].copy()
+
+            def identificar_colecao_pdf(data):
+                if pd.isnull(data):
+                    return None
+                ano = data.year
+                if 5 <= data.month <= 10:
+                    return f"Verão {ano}"
+                elif data.month >= 11:
+                    return f"Inverno {ano + 1}"
+                else:
+                    return f"Inverno {ano}"
+
+            df_colecoes['Colecao'] = df_colecoes['Data Cadastro'].apply(identificar_colecao_pdf)
+            colecao_vigente = identificar_colecao_pdf(datetime.today())
+
+            vendas_colecao = df_colecoes.groupby('Colecao').agg({
+                'Qtd Venda': 'sum',
+                'Vlr Venda': 'sum'
+            }).reset_index()
+
+            vendas_colecao['Ano'] = vendas_colecao['Colecao'].str.extract(r'(\d{4})').astype(int)
+            vendas_colecao = vendas_colecao.sort_values(by='Ano', ascending=False)
+
+            if colecao_vigente not in vendas_colecao['Colecao'].values:
+                linha_vigente = pd.DataFrame({
+                    'Colecao': [colecao_vigente],
+                    'Qtd Venda': [0],
+                    'Vlr Venda': [0.0],
+                    'Ano': [int(colecao_vigente.split()[1])]
+                })
+                vendas_colecao = pd.concat([linha_vigente, vendas_colecao], ignore_index=True)
+
+            colecoes_pdf = vendas_colecao.drop(columns='Ano').drop_duplicates('Colecao').head(3)
+
+            for _, row in colecoes_pdf.iterrows():
+                nome = row['Colecao']
+                pares = int(row['Qtd Venda'])
+                valor = f"R$ {row['Vlr Venda']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                pdf.cell(0, 10, f"{nome} - {pares} pares - {valor}", ln=True)
+            pdf.ln(10)
+
+            # TOP 10 LINHAS
             pdf.set_font("Arial", "B", 14)
             pdf.cell(0, 10, "Top 10 Linhas Vendidas", ln=True)
             pdf.set_font("Arial", size=12)
@@ -424,7 +544,7 @@ if st.session_state.get("pdf_ready", False):
                 pdf.cell(0, 10, f"{row['Linha']}: {int(row['Quantidade Vendida'])} unidades", ln=True)
             pdf.ln(10)
 
-            # Gráficos
+            # GRÁFICOS
             graficos = [
                 st.session_state['fig1'], st.session_state['fig2'],
                 st.session_state['fig3'], st.session_state['fig4'], st.session_state['fig5']
@@ -432,7 +552,6 @@ if st.session_state.get("pdf_ready", False):
             nomes = ["vendas_ano", "pedidos_ano", "preco_medio", "valores_vendidos", "top10_linhas"]
 
             st.info("📊 Iniciando salvamento dos gráficos para PDF...")
-
             for fig, nome in zip(graficos, nomes):
                 st.write(f"📊 Salvando gráfico: {nome}")
                 path = salvar_grafico(fig, nome)
@@ -444,7 +563,7 @@ if st.session_state.get("pdf_ready", False):
                     pdf.set_font("Arial", "B", 12)
                     pdf.cell(0, 10, f"[Gráfico ausente ou inválido: {nome}]", ln=True)
 
-            # Finalizar PDF
+            # FINALIZAÇÃO
             caminho_pdf = os.path.join(tempfile.gettempdir(), "relatorio_preditivo_kidy.pdf")
             pdf.output(caminho_pdf)
 
