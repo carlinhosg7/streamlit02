@@ -89,8 +89,8 @@ meses_portugues = {
 }
 
 # URL do arquivo no GitHub (modo leitura)
-URL_1 = "https://raw.githubusercontent.com/seuusuario/seurepositorio/main/DADOS_PREDITIVA_1.csv"
-URL_2 = "https://raw.githubusercontent.com/seuusuario/seurepositorio/main/DADOS_PREDITIVA_2.csv"
+URL_1 = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/refs/heads/main/DADOS_PREDITIVA_1.csv"
+URL_2 = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/refs/heads/main/DADOS_PREDITIVA_2.csv"
 
 # CARREGAR DADOS
 @st.cache_data(ttl=3600)
