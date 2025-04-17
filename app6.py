@@ -259,51 +259,77 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
 
                 # MACHINE LEARNING
                 st.subheader("🤖 Previsão de Linhas para Oferta (Machine Learning)")
-                progress_bar = st.progress(0)
 
-                dados_ml = df.copy()
-                dados_ml['Mes Pedido'] = dados_ml['Data Cadastro'].dt.month
-                dados_ml['Compra'] = dados_ml['Qtd Venda'].apply(lambda x: 1 if x > 0 else 0)
+                # Inicializa a barra de progresso
+                progress_bar = st.progress(0, text="⏳ Preparando dados para ML (0%)")
 
-                le_grupo = LabelEncoder().fit(dados_ml['Codigo Grupo Cliente'])
-                le_cliente = LabelEncoder().fit(dados_ml['Codigo Cliente'])
-                le_linha = LabelEncoder().fit(dados_ml['Linha'])
+                # Etapa 1: preparar dados
+                @st.cache_data(ttl=600)
+                def preparar_dados_ml(df):
+                    df_ml = df.copy()
+                    df_ml['Mes Pedido'] = df_ml['Data Cadastro'].dt.month
+                    df_ml['Compra'] = df_ml['Qtd Venda'].apply(lambda x: 1 if x > 0 else 0)
+                    return df_ml
 
-                dados_ml['Grupo_Code'] = le_grupo.transform(dados_ml['Codigo Grupo Cliente'])
-                dados_ml['Cliente_Code'] = le_cliente.transform(dados_ml['Codigo Cliente'])
-                dados_ml['Linha_Code'] = le_linha.transform(dados_ml['Linha'])
+                dados_ml = preparar_dados_ml(df)
+                progress_bar.progress(20, text="✅ Etapa 1: Dados preparados (20%)")
 
-                X = dados_ml[['Grupo_Code', 'Cliente_Code', 'Linha_Code', 'Mes Pedido']]
-                y = dados_ml['Compra']
+                # Etapa 2: Treinar modelo
+                @st.cache_resource
+                def treinar_modelo_rf(df_ml):
+                    le_grupo = LabelEncoder().fit(df_ml['Codigo Grupo Cliente'])
+                    le_cliente = LabelEncoder().fit(df_ml['Codigo Cliente'])
+                    le_linha = LabelEncoder().fit(df_ml['Linha'])
 
-                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-                modelo_rf = RandomForestClassifier(n_estimators=100, random_state=42)
-                modelo_rf.fit(X_train, y_train)
+                    df_ml['Grupo_Code'] = le_grupo.transform(df_ml['Codigo Grupo Cliente'])
+                    df_ml['Cliente_Code'] = le_cliente.transform(df_ml['Codigo Cliente'])
+                    df_ml['Linha_Code'] = le_linha.transform(df_ml['Linha'])
 
-                acc = accuracy_score(y_test, modelo_rf.predict(X_test))
-                st.info(f"🔎 Acurácia do Modelo: {acc:.2%}")
+                    X = df_ml[['Grupo_Code', 'Cliente_Code', 'Linha_Code', 'Mes Pedido']]
+                    y = df_ml['Compra']
 
+                    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+                    modelo = RandomForestClassifier(n_estimators=100, random_state=42)
+                    modelo.fit(X_train, y_train)
+                    acc = accuracy_score(y_test, modelo.predict(X_test))
+
+                    return modelo, le_grupo, le_cliente, le_linha, acc
+
+                modelo_rf, le_grupo, le_cliente, le_linha, acc = treinar_modelo_rf(dados_ml)
+                progress_bar.progress(50, text="✅ Etapa 2: Modelo treinado (50%)")
+
+                # Etapa 3: Preparar dados para predição
                 grupo_id = codigo_grupo_cliente or dados_filtrados['Codigo Grupo Cliente'].iloc[0]
                 cliente_id = codigo_cliente or dados_filtrados['Codigo Cliente'].iloc[0]
-
                 linhas_possiveis = df['Linha'].unique()
                 mes_atual = datetime.now().month
 
-                dados_para_prever = pd.DataFrame({
-                    'Grupo_Code': le_grupo.transform([grupo_id] * len(linhas_possiveis)),
-                    'Cliente_Code': le_cliente.transform([cliente_id] * len(linhas_possiveis)),
-                    'Linha_Code': le_linha.transform(linhas_possiveis),
-                    'Mes Pedido': [mes_atual] * len(linhas_possiveis)
-                })
+                try:
+                    dados_para_prever = pd.DataFrame({
+                        'Grupo_Code': le_grupo.transform([grupo_id] * len(linhas_possiveis)),
+                        'Cliente_Code': le_cliente.transform([cliente_id] * len(linhas_possiveis)),
+                        'Linha_Code': le_linha.transform(linhas_possiveis),
+                        'Mes Pedido': [mes_atual] * len(linhas_possiveis)
+                    })
+                    progress_bar.progress(70, text="✅ Etapa 3: Dados para predição gerados (70%)")
 
-                probs = modelo_rf.predict_proba(dados_para_prever)[:, 1]
+                    probs = modelo_rf.predict_proba(dados_para_prever)[:, 1]
 
-                df_preds = pd.DataFrame({
-                    'Linha': linhas_possiveis,
-                    'Probabilidade de Compra': probs
-                }).sort_values(by='Probabilidade de Compra', ascending=False)
+                    df_preds = pd.DataFrame({
+                        'Linha': linhas_possiveis,
+                        'Probabilidade de Compra': probs
+                    }).sort_values(by='Probabilidade de Compra', ascending=False)
 
-                st.table(df_preds.head(10))
+                    progress_bar.progress(100, text="✅ Etapa 4: Predição finalizada (100%)")
+
+                    st.success("🎉 Predição realizada com sucesso!")
+                    st.table(df_preds.head(10))
+
+                except ValueError as e:
+                    st.warning(f"⚠️ Erro ao prever: {e}. Verifique se o código do cliente ou grupo existe nos dados.")
+                    progress_bar.progress(0, text="❌ Erro durante a predição.")
+
+
 
                 # GRÁFICOS ANALÍTICOS
                 st.subheader("📊 Gráficos Analíticos do Período Selecionado")
