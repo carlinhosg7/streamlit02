@@ -155,8 +155,18 @@ st.title("📊 Dashboard Analítico")
 st.sidebar.image(logo_kidy, width=100)
 st.sidebar.header("🔧 Filtros de Análise")
 
-codigo_grupo_cliente = st.sidebar.text_input("Código do Grupo de Cliente (Opcional):").strip().upper()
-codigo_cliente = st.sidebar.text_input("Código do Cliente (Opcional):").strip().upper()
+# Opções formatadas para busca com nome
+opcoes_grupo_cliente = df[['Codigo Grupo Cliente', 'Grupo Cliente']].drop_duplicates()
+opcoes_grupo_cliente['Busca'] = opcoes_grupo_cliente['Codigo Grupo Cliente'] + ' - ' + opcoes_grupo_cliente['Grupo Cliente']
+busca_grupo = st.sidebar.selectbox("🔍 Buscar Grupo Cliente:", [''] + sorted(opcoes_grupo_cliente['Busca'].tolist()))
+
+opcoes_cliente = df[['Codigo Cliente', 'Razao Social']].drop_duplicates()
+opcoes_cliente['Busca'] = opcoes_cliente['Codigo Cliente'] + ' - ' + opcoes_cliente['Razao Social']
+busca_cliente = st.sidebar.selectbox("🔍 Buscar Cliente:", [''] + sorted(opcoes_cliente['Busca'].tolist()))
+
+# Extrair apenas os códigos selecionados
+codigo_grupo_cliente = busca_grupo.split(' - ')[0].strip().upper() if busca_grupo else ''
+codigo_cliente = busca_cliente.split(' - ')[0].strip().upper() if busca_cliente else ''
 
 data_min = df['Data Cadastro'].min().date()
 data_max = df['Data Cadastro'].max().date()
@@ -195,7 +205,25 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 nome_grupo = dados_filtrados['Grupo Cliente'].iloc[0]
                 total_lojas = dados_filtrados['Codigo Cliente'].nunique()
 
+                # Mapeamento dos supervisores
+                mapa_supervisores = {
+                    '9902': 'Centro Oeste',
+                    '9907': 'Sul',
+                    '9914': 'Norte / Nordeste',
+                    '9915': 'REM',
+                    '9916': 'SPC',
+                    '9917': 'SPI'
+                }
+
+                # Extrair código do supervisor
+                cod_supervisor = dados_filtrados['Codigo Supervisor'].astype(str).dropna().unique()
+                nome_supervisor = mapa_supervisores.get(cod_supervisor[0], 'Desconhecido') if len(cod_supervisor) > 0 else 'Desconhecido'
+
+                # Exibe grupo, lojas e supervisor
                 st.markdown(f"## 📍 Grupo Cliente: {nome_grupo} | 🏬 Lojas: {total_lojas}")
+                st.markdown(f"#### 🧑‍💼 Supervisor: {nome_supervisor}")
+
+
 
                 rfv_resultado = calcular_rfv_individual(dados_filtrados)
                 colrfv1, colrfv2, colrfv3, colrfv4, colrfv5 = st.columns(5)
@@ -475,11 +503,27 @@ if st.session_state.get("pdf_ready", False):
 
             pdf.set_font("Arial", size=12)
             pdf.set_text_color(0, 0, 0)
+            # Mapeamento dos supervisores (mesmo dicionário do app)
+            mapa_supervisores = {
+                '9902': 'Centro Oeste',
+                '9907': 'Sul',
+                '9914': 'Norte / Nordeste',
+                '9915': 'REM',
+                '9916': 'SPC',
+                '9917': 'SPI'
+            }
+
+            # Buscar nome do supervisor para PDF
+            df_supervisor = st.session_state['dados_filtrados']
+            cod_supervisor = df_supervisor['Codigo Supervisor'].astype(str).dropna().unique()
+            nome_supervisor = mapa_supervisores.get(cod_supervisor[0], 'Desconhecido') if len(cod_supervisor) > 0 else 'Desconhecido'
+
+            # Cabeçalho PDF com Supervisor
             pdf.cell(0, 10, f"Grupo Cliente: {st.session_state['nome_grupo']}", ln=True)
             pdf.cell(0, 10, f"Lojas Atendidas: {st.session_state['total_lojas']}", ln=True)
+            pdf.cell(0, 10, f"Supervisor: {nome_supervisor}", ln=True)
             pdf.cell(0, 10, f"Período Analisado: {st.session_state['periodo_analise']}", ln=True)
             pdf.cell(0, 10, f"Última Compra: {st.session_state['ultima_compra']}", ln=True)
-            pdf.ln(10)
 
             # RFV
             pdf.set_font("Arial", "B", 14)
