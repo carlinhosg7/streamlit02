@@ -15,14 +15,63 @@ import plotly.io as pio
 import kaleido # força o loading do kaleido para evitar erro de importação
 pio.kaleido.scope.default_format = "png"
 import plotly.express as px
+import unicodedata
 
-# CONFIG PÁGINA
+# 🔐 FUNÇÃO DE AUTENTICAÇÃO
+def autenticar_usuario_excel(caminho_arquivo):
+    try:
+        df_usuarios = pd.read_excel(caminho_arquivo, engine="openpyxl")
+
+        # Normaliza os nomes das colunas
+        df_usuarios.columns = [
+            unicodedata.normalize('NFKD', col).encode('ascii', errors='ignore').decode('utf-8').strip().lower().replace(" ", "_")
+            for col in df_usuarios.columns
+        ]
+
+        # Converte os dados para string
+        df_usuarios['usuario'] = df_usuarios['usuario'].apply(lambda x: str(x).strip())
+        df_usuarios['senha'] = df_usuarios['senha'].astype(str).str.strip()
+
+        # Inicializa autenticação
+        st.session_state['autenticado'] = st.session_state.get('autenticado', False)
+
+        if not st.session_state['autenticado']:
+            with st.sidebar:
+                st.markdown("### 🔐 Login")
+                usuario = st.text_input("Usuário").strip()
+                senha = st.text_input("Senha", type="password").strip()
+
+                if st.button("Entrar"):
+                    if usuario in df_usuarios['usuario'].values:
+                        senha_valida = df_usuarios[df_usuarios['usuario'] == usuario]['senha'].values[0]
+                        if senha == senha_valida:
+                            st.session_state['autenticado'] = True
+                            st.session_state['codigo_representante'] = usuario  # <-- Adicione esta linha
+                            st.success("✅ Login realizado com sucesso!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Senha incorreta.")  
+
+        if not st.session_state['autenticado']:
+            st.stop()
+
+    except Exception as e:
+        st.error(f"Erro ao carregar planilha de autenticação: {e}")
+        st.stop()
+
+# 🎨 CONFIG PÁGINA (PRIMEIRA CHAMADA DO STREAMLIT)
 st.set_page_config(
     page_title="Dashboard Analítico",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# 🚀 SÓ DEPOIS AUTENTICAÇÃO
+autenticar_usuario_excel("auth.xlsx")
+
+
+st.title("🔓 Dashboard liberado após login")
 
 # CSS CUSTOMIZADO
 def add_custom_css():
@@ -93,14 +142,17 @@ URL_1 = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/refs/heads/ma
 URL_2 = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/refs/heads/main/DADOS_PREDITIVA_2.csv"
 
 # CARREGAR DADOS
-@st.cache_data(ttl=3600)
+st.cache_data(ttl=3600)
 def carregar_dados_processados():
     try:
         df1 = pd.read_csv(URL_1)
         df2 = pd.read_csv(URL_2)
         df = pd.concat([df1, df2], ignore_index=True)
 
-        # Conversões e ajustes como antes
+        # Padroniza o campo de representante
+        df['Codigo Representante'] = df['Codigo Representante'].astype(str).str.strip().str.lstrip('0')
+
+        # Outros tratamentos das colunas
         df['Data Cadastro'] = pd.to_datetime(df['Data Cadastro'], errors='coerce')
         df['Data Ultima Compra'] = pd.to_datetime(df['Data Ultima Compra'], errors='coerce')
         df['Codigo Grupo Cliente'] = df['Codigo Grupo Cliente'].astype(str).str.upper()
@@ -108,10 +160,23 @@ def carregar_dados_processados():
         df['Preço Médio Produto'] = df.apply(
             lambda row: row['Vlr Venda'] / row['Qtd Venda'] if row['Qtd Venda'] > 0 else 0, axis=1
         )
+
+        # 🚨 AQUI ENTRA A LÓGICA DE PERFIL ADMIN
+        codigo_representante = str(st.session_state.get('codigo_representante', '')).strip().lower().lstrip('0')
+        if codigo_representante and codigo_representante != 'admin':
+            df = df[df['Codigo Representante'] == codigo_representante]
+
         return df
     except Exception as e:
         st.error(f"Erro ao carregar dados: {e}")
         return pd.DataFrame()
+        # sse bloco vai exibir um aviso claro no topo do dashboard, indicando se o usuário está como admin (vendo tudo) ou mostrando o código do representante comum.
+        codigo_representante_logado = st.session_state.get('codigo_representante', '')
+        if str(codigo_representante_logado).strip().lower() == 'admin':
+            st.markdown("🟢 **Modo Admin: Visualizando todos os dados**")
+        else:
+            st.markdown(f"🆔 **Representante:** {codigo_representante_logado}")
+
 
 # RFV SCORE
 def calcular_rfv_individual(dados_filtrados):
@@ -215,12 +280,19 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                     '9917': 'SPI'
                 }
 
-                # Extrair código do supervisor
+                # Extrai representantes únicos do grupo selecionado nos dados filtrados
+                cods_representantes = dados_filtrados['Codigo Representante'].astype(str).dropna().unique()
+                cods_representantes = sorted(cods_representantes)
+                cods_repr_str = ', '.join(cods_representantes)
+
+                # Extrai código(s) de supervisor dos dados filtrados
                 cod_supervisor = dados_filtrados['Codigo Supervisor'].astype(str).dropna().unique()
                 nome_supervisor = mapa_supervisores.get(cod_supervisor[0], 'Desconhecido') if len(cod_supervisor) > 0 else 'Desconhecido'
 
-                # Exibe grupo, lojas e supervisor
-                st.markdown(f"## 📍 Grupo Cliente: {nome_grupo} | 🏬 Lojas: {total_lojas}")
+                # Exibe o(s) representantes do grupo selecionado
+                st.markdown(
+                    f"## 📍 Grupo Cliente: {nome_grupo} | 🏬 Lojas: {total_lojas} | 🆔 Representante(s): {cods_repr_str}"
+                )
                 st.markdown(f"#### 🧑‍💼 Supervisor: {nome_supervisor}")
 
 
