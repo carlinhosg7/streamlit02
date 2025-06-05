@@ -399,7 +399,7 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 total_vendas_linha = dados_filtrados.groupby(['Codigo Linha', 'Linha'])['Qtd Venda'].sum().reset_index(name='Quantidade Vendida')
                 top_linhas = total_vendas_linha.sort_values(by='Quantidade Vendida', ascending=False).head(10)
 
-                st.markdown("👉 **🔮 Top 10 Linhas linhas mais compradas pelo cliente:**")
+                st.markdown("👉 **🔮 Top 10 Linhas Preditivas para Ofertar:**")
                 st.table(top_linhas)
 
                 fig_top_linhas = px.bar(

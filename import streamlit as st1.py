@@ -15,63 +15,14 @@ import plotly.io as pio
 import kaleido # força o loading do kaleido para evitar erro de importação
 pio.kaleido.scope.default_format = "png"
 import plotly.express as px
-import unicodedata
 
-# 🔐 FUNÇÃO DE AUTENTICAÇÃO
-def autenticar_usuario_excel(caminho_arquivo):
-    try:
-        df_usuarios = pd.read_excel(caminho_arquivo, engine="openpyxl")
-
-        # Normaliza os nomes das colunas
-        df_usuarios.columns = [
-            unicodedata.normalize('NFKD', col).encode('ascii', errors='ignore').decode('utf-8').strip().lower().replace(" ", "_")
-            for col in df_usuarios.columns
-        ]
-
-        # Converte os dados para string
-        df_usuarios['usuario'] = df_usuarios['usuario'].apply(lambda x: str(x).strip())
-        df_usuarios['senha'] = df_usuarios['senha'].astype(str).str.strip()
-
-        # Inicializa autenticação
-        st.session_state['autenticado'] = st.session_state.get('autenticado', False)
-
-        if not st.session_state['autenticado']:
-            with st.sidebar:
-                st.markdown("### 🔐 Login")
-                usuario = st.text_input("Usuário").strip()
-                senha = st.text_input("Senha", type="password").strip()
-
-                if st.button("Entrar"):
-                    if usuario in df_usuarios['usuario'].values:
-                        senha_valida = df_usuarios[df_usuarios['usuario'] == usuario]['senha'].values[0]
-                        if senha == senha_valida:
-                            st.session_state['autenticado'] = True
-                            st.session_state['codigo_representante'] = usuario  # <-- Adicione esta linha
-                            st.success("✅ Login realizado com sucesso!")
-                            st.rerun()
-                        else:
-                            st.error("❌ Senha incorreta.")  
-
-        if not st.session_state['autenticado']:
-            st.stop()
-
-    except Exception as e:
-        st.error(f"Erro ao carregar planilha de autenticação: {e}")
-        st.stop()
-
-# 🎨 CONFIG PÁGINA (PRIMEIRA CHAMADA DO STREAMLIT)
+# CONFIG PÁGINA
 st.set_page_config(
     page_title="Dashboard Analítico",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# 🚀 SÓ DEPOIS AUTENTICAÇÃO
-autenticar_usuario_excel("auth.xlsx")
-
-
-st.title("🔓 Dashboard liberado após login")
 
 # CSS CUSTOMIZADO
 def add_custom_css():
@@ -142,17 +93,14 @@ URL_1 = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/refs/heads/ma
 URL_2 = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/refs/heads/main/DADOS_PREDITIVA_2.csv"
 
 # CARREGAR DADOS
-st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
 def carregar_dados_processados():
     try:
         df1 = pd.read_csv(URL_1)
         df2 = pd.read_csv(URL_2)
         df = pd.concat([df1, df2], ignore_index=True)
 
-        # Padroniza o campo de representante
-        df['Codigo Representante'] = df['Codigo Representante'].astype(str).str.strip().str.lstrip('0')
-
-        # Outros tratamentos das colunas
+        # Conversões e ajustes como antes
         df['Data Cadastro'] = pd.to_datetime(df['Data Cadastro'], errors='coerce')
         df['Data Ultima Compra'] = pd.to_datetime(df['Data Ultima Compra'], errors='coerce')
         df['Codigo Grupo Cliente'] = df['Codigo Grupo Cliente'].astype(str).str.upper()
@@ -160,23 +108,10 @@ def carregar_dados_processados():
         df['Preço Médio Produto'] = df.apply(
             lambda row: row['Vlr Venda'] / row['Qtd Venda'] if row['Qtd Venda'] > 0 else 0, axis=1
         )
-
-        # 🚨 AQUI ENTRA A LÓGICA DE PERFIL ADMIN
-        codigo_representante = str(st.session_state.get('codigo_representante', '')).strip().lower().lstrip('0')
-        if codigo_representante and codigo_representante != 'admin':
-            df = df[df['Codigo Representante'] == codigo_representante]
-
         return df
     except Exception as e:
         st.error(f"Erro ao carregar dados: {e}")
         return pd.DataFrame()
-        # sse bloco vai exibir um aviso claro no topo do dashboard, indicando se o usuário está como admin (vendo tudo) ou mostrando o código do representante comum.
-        codigo_representante_logado = st.session_state.get('codigo_representante', '')
-        if str(codigo_representante_logado).strip().lower() == 'admin':
-            st.markdown("🟢 **Modo Admin: Visualizando todos os dados**")
-        else:
-            st.markdown(f"🆔 **Representante:** {codigo_representante_logado}")
-
 
 # RFV SCORE
 def calcular_rfv_individual(dados_filtrados):
@@ -220,18 +155,8 @@ st.title("📊 Dashboard Analítico")
 st.sidebar.image(logo_kidy, width=100)
 st.sidebar.header("🔧 Filtros de Análise")
 
-# Opções formatadas para busca com nome
-opcoes_grupo_cliente = df[['Codigo Grupo Cliente', 'Grupo Cliente']].drop_duplicates()
-opcoes_grupo_cliente['Busca'] = opcoes_grupo_cliente['Codigo Grupo Cliente'] + ' - ' + opcoes_grupo_cliente['Grupo Cliente']
-busca_grupo = st.sidebar.selectbox("🔍 Buscar Grupo Cliente:", [''] + sorted(opcoes_grupo_cliente['Busca'].tolist()))
-
-opcoes_cliente = df[['Codigo Cliente', 'Razao Social']].drop_duplicates()
-opcoes_cliente['Busca'] = opcoes_cliente['Codigo Cliente'] + ' - ' + opcoes_cliente['Razao Social']
-busca_cliente = st.sidebar.selectbox("🔍 Buscar Cliente:", [''] + sorted(opcoes_cliente['Busca'].tolist()))
-
-# Extrair apenas os códigos selecionados
-codigo_grupo_cliente = busca_grupo.split(' - ')[0].strip().upper() if busca_grupo else ''
-codigo_cliente = busca_cliente.split(' - ')[0].strip().upper() if busca_cliente else ''
+codigo_grupo_cliente = st.sidebar.text_input("Código do Grupo de Cliente (Opcional):").strip().upper()
+codigo_cliente = st.sidebar.text_input("Código do Cliente (Opcional):").strip().upper()
 
 data_min = df['Data Cadastro'].min().date()
 data_max = df['Data Cadastro'].max().date()
@@ -270,32 +195,7 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 nome_grupo = dados_filtrados['Grupo Cliente'].iloc[0]
                 total_lojas = dados_filtrados['Codigo Cliente'].nunique()
 
-                # Mapeamento dos supervisores
-                mapa_supervisores = {
-                    '9902': 'Centro Oeste',
-                    '9907': 'Sul',
-                    '9914': 'Norte / Nordeste',
-                    '9915': 'REM',
-                    '9916': 'SPC',
-                    '9917': 'SPI'
-                }
-
-                # Extrai representantes únicos do grupo selecionado nos dados filtrados
-                cods_representantes = dados_filtrados['Codigo Representante'].astype(str).dropna().unique()
-                cods_representantes = sorted(cods_representantes)
-                cods_repr_str = ', '.join(cods_representantes)
-
-                # Extrai código(s) de supervisor dos dados filtrados
-                cod_supervisor = dados_filtrados['Codigo Supervisor'].astype(str).dropna().unique()
-                nome_supervisor = mapa_supervisores.get(cod_supervisor[0], 'Desconhecido') if len(cod_supervisor) > 0 else 'Desconhecido'
-
-                # Exibe o(s) representantes do grupo selecionado
-                st.markdown(
-                    f"## 📍 Grupo Cliente: {nome_grupo} | 🏬 Lojas: {total_lojas} | 🆔 Representante(s): {cods_repr_str}"
-                )
-                st.markdown(f"#### 🧑‍💼 Supervisor: {nome_supervisor}")
-
-
+                st.markdown(f"## 📍 Grupo Cliente: {nome_grupo} | 🏬 Lojas: {total_lojas}")
 
                 rfv_resultado = calcular_rfv_individual(dados_filtrados)
                 colrfv1, colrfv2, colrfv3, colrfv4, colrfv5 = st.columns(5)
@@ -399,7 +299,7 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 total_vendas_linha = dados_filtrados.groupby(['Codigo Linha', 'Linha'])['Qtd Venda'].sum().reset_index(name='Quantidade Vendida')
                 top_linhas = total_vendas_linha.sort_values(by='Quantidade Vendida', ascending=False).head(10)
 
-                st.markdown("👉 **🔮 Top 10 Linhas linhas mais compradas pelo cliente:**")
+                st.markdown("👉 **🔮 Top 10 Linhas Preditivas para Ofertar:**")
                 st.table(top_linhas)
 
                 fig_top_linhas = px.bar(
@@ -454,8 +354,6 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 modelo_rf, le_grupo, le_cliente, le_linha, acc = treinar_modelo_rf(dados_ml)
                 progress_bar.progress(50, text="✅ Etapa 2: Modelo treinado (50%)")
 
-                st.info(f"🧠 Acurácia do modelo: {acc:.2%}")
-                
                 # Etapa 3: Preparar dados para predição
                 grupo_id = codigo_grupo_cliente or dados_filtrados['Codigo Grupo Cliente'].iloc[0]
                 cliente_id = codigo_cliente or dados_filtrados['Codigo Cliente'].iloc[0]
@@ -527,45 +425,30 @@ if st.session_state.get("pdf_ready", False):
         with st.spinner("🧾 Gerando relatório..."):
             st.write("Iniciando a geração do relatório...")
 
-            # Função para salvar gráfico com tema colorido
+            # Função para salvar gráfico com verificação
             def salvar_grafico(fig, nome):
                 import tempfile
                 import os
                 import plotly.io as pio
-                import plotly.graph_objects as go
 
-                st.write(f"Verificando gráfico: {nome}")
+                st.write(f"Verificando gráfico: {nome}")  # Verificando o gráfico sendo processado
 
                 if not fig.data:
                     st.warning(f"⚠️ O gráfico '{nome}' está vazio e não será incluído no relatório.")
                     return None
 
                 try:
-                    # Cria uma nova figura limpa com os mesmos dados
-                    nova_fig = go.Figure(data=fig.data)
-
-                    # Reaplica os eixos e layout com estilo claro e fundo branco
-                    nova_fig.update_layout(
-                        template="plotly_white",
-                        title=fig.layout.title,
-                        xaxis=fig.layout.xaxis,
-                        yaxis=fig.layout.yaxis,
-                        font=dict(color="black", size=14),
-                        paper_bgcolor="white",
-                        plot_bgcolor="white"
-                    )
-
                     caminho = os.path.join(tempfile.gettempdir(), f"{nome}.png")
-                    nova_fig.write_image(caminho, format="png", engine="kaleido", scale=2)
-                    st.write(f"✅ Gráfico {nome} exportado com sucesso!")
+                    fig.write_image(caminho, format="png", engine="kaleido", scale=2)
+                    st.write(f"Gráfico {nome} salvo com sucesso!")
                     return caminho
-
                 except Exception as e:
                     st.error(f"❌ Erro ao salvar gráfico '{nome}': {e}")
                     return None
 
 
             # Início do PDF
+            st.write("Iniciando o processo de criação do PDF...")  # Marca o início do processo do PDF
             pdf = FPDF()
             pdf.set_auto_page_break(auto=True, margin=15)
             pdf.add_page()
@@ -575,29 +458,12 @@ if st.session_state.get("pdf_ready", False):
 
             pdf.set_font("Arial", size=12)
             pdf.set_text_color(0, 0, 0)
-            # Mapeamento dos supervisores (mesmo dicionário do app)
-            mapa_supervisores = {
-                '9902': 'Centro Oeste',
-                '9907': 'Sul',
-                '9914': 'Norte / Nordeste',
-                '9915': 'REM',
-                '9916': 'SPC',
-                '9917': 'SPI'
-            }
-
-            # Buscar nome do supervisor para PDF
-            df_supervisor = st.session_state['dados_filtrados']
-            cod_supervisor = df_supervisor['Codigo Supervisor'].astype(str).dropna().unique()
-            nome_supervisor = mapa_supervisores.get(cod_supervisor[0], 'Desconhecido') if len(cod_supervisor) > 0 else 'Desconhecido'
-
-            # Cabeçalho PDF com Supervisor
             pdf.cell(0, 10, f"Grupo Cliente: {st.session_state['nome_grupo']}", ln=True)
             pdf.cell(0, 10, f"Lojas Atendidas: {st.session_state['total_lojas']}", ln=True)
-            pdf.cell(0, 10, f"Supervisor: {nome_supervisor}", ln=True)
             pdf.cell(0, 10, f"Período Analisado: {st.session_state['periodo_analise']}", ln=True)
             pdf.cell(0, 10, f"Última Compra: {st.session_state['ultima_compra']}", ln=True)
+            pdf.ln(10)
 
-            # RFV
             pdf.set_font("Arial", "B", 14)
             pdf.cell(0, 10, "Métricas RFV", ln=True)
             pdf.set_font("Arial", size=12)
@@ -605,12 +471,14 @@ if st.session_state.get("pdf_ready", False):
                 pdf.cell(0, 10, f"{key}: {val}", ln=True)
             pdf.ln(10)
 
-            # COLEÇÕES
+            # --- TABELA DAS 3 ÚLTIMAS COLEÇÕES ---
             pdf.set_font("Arial", "B", 14)
             pdf.cell(0, 10, "Vendas das 3 Últimas Coleções", ln=True)
             pdf.set_font("Arial", size=12)
 
+            # Calcula novamente (caso precise) ou usa do session_state
             df_colecoes = st.session_state['dados_filtrados'].copy()
+
 
             def identificar_colecao_pdf(data):
                 if pd.isnull(data):
@@ -645,14 +513,16 @@ if st.session_state.get("pdf_ready", False):
 
             colecoes_pdf = vendas_colecao.drop(columns='Ano').drop_duplicates('Colecao').head(3)
 
+            # Escreve a tabela no PDF
             for _, row in colecoes_pdf.iterrows():
                 nome = row['Colecao']
                 pares = int(row['Qtd Venda'])
                 valor = f"R$ {row['Vlr Venda']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
                 pdf.cell(0, 10, f"{nome} - {pares} pares - {valor}", ln=True)
+
             pdf.ln(10)
 
-            # TOP 10 LINHAS
+
             pdf.set_font("Arial", "B", 14)
             pdf.cell(0, 10, "Top 10 Linhas Vendidas", ln=True)
             pdf.set_font("Arial", size=12)
@@ -660,7 +530,7 @@ if st.session_state.get("pdf_ready", False):
                 pdf.cell(0, 10, f"{row['Linha']}: {int(row['Quantidade Vendida'])} unidades", ln=True)
             pdf.ln(10)
 
-            # GRÁFICOS
+            # Gráficos
             graficos = [
                 st.session_state['fig1'], st.session_state['fig2'],
                 st.session_state['fig3'], st.session_state['fig4'], st.session_state['fig5']
@@ -668,6 +538,7 @@ if st.session_state.get("pdf_ready", False):
             nomes = ["vendas_ano", "pedidos_ano", "preco_medio", "valores_vendidos", "top10_linhas"]
 
             st.info("📊 Iniciando salvamento dos gráficos para PDF...")
+
             for fig, nome in zip(graficos, nomes):
                 st.write(f"📊 Salvando gráfico: {nome}")
                 path = salvar_grafico(fig, nome)
@@ -679,7 +550,7 @@ if st.session_state.get("pdf_ready", False):
                     pdf.set_font("Arial", "B", 12)
                     pdf.cell(0, 10, f"[Gráfico ausente ou inválido: {nome}]", ln=True)
 
-            # FINALIZAÇÃO
+            # Finalizar PDF
             caminho_pdf = os.path.join(tempfile.gettempdir(), "relatorio_preditivo_kidy.pdf")
             pdf.output(caminho_pdf)
 
