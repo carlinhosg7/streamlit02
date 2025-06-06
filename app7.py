@@ -141,7 +141,7 @@ meses_portugues = {
 URL_1 = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/refs/heads/main/DADOS_PREDITIVA_1.csv"
 URL_2 = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/refs/heads/main/DADOS_PREDITIVA_2.csv"
 
-# CARREGAR DADOS
+
 st.cache_data(ttl=3600)
 def carregar_dados_processados():
     try:
@@ -412,6 +412,50 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 )
                 fig_top_linhas.update_traces(textposition='outside')
                 st.plotly_chart(fig_top_linhas)
+                
+                # Comparativo de linhas compradas vs possíveis
+                st.markdown("### 🧾 Comparativo de Linhas")
+
+                # Carrega planilha com todas as linhas possíveis
+                linhas_possiveis = pd.read_excel("DADOS PREDITIVA LINHAS.xlsx", sheet_name="DADOS PREDITIVA LINHAS")
+                linhas_possiveis = linhas_possiveis.drop_duplicates(subset=["Linha"])
+
+                # Identifica as linhas compradas
+                linhas_compradas = dados_filtrados[dados_filtrados["Qtd Venda"] > 0]["Linha"].unique()
+                linhas_possiveis["Comprou"] = linhas_possiveis["Linha"].isin(linhas_compradas)
+
+                # Tenta prever afinidade
+                try:
+                    linhas_codificadas = le_linha.transform(linhas_possiveis["Linha"])
+                    grupo_cod = le_grupo.transform([grupo_id] * len(linhas_codificadas))
+                    cliente_cod = le_cliente.transform([cliente_id] * len(linhas_codificadas))
+                    mes_atual = datetime.now().month
+
+                    dados_pred = pd.DataFrame({
+                        "Grupo_Code": grupo_cod,
+                        "Cliente_Code": cliente_cod,
+                        "Linha_Code": linhas_codificadas,
+                        "Mes Pedido": [mes_atual] * len(linhas_codificadas)
+                    })
+
+                    probs = modelo_rf.predict_proba(dados_pred)[:, 1]
+                    linhas_possiveis["Afinidade Compra"] = probs
+                except Exception as e:
+                    linhas_possiveis["Afinidade Compra"] = 0
+                    st.warning(f"⚠️ Erro ao prever afinidade: {e}")
+
+                # Função de estilo para pintar de verde
+                def cor_linha(val):
+                    if not val["Comprou"] and val["Afinidade Compra"] >= 0.5:
+                        return ["background-color: #00cc88"] * len(val)
+                    return [""] * len(val)
+
+                st.dataframe(linhas_possiveis[["Linha", "Comprou", "Afinidade Compra"]]
+                            .style.apply(cor_linha, axis=1))
+
+
+
+
 
                 # MACHINE LEARNING
                 st.subheader("🤖 Previsão de Linhas para Oferta (Machine Learning)")

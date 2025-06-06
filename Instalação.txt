@@ -1,0 +1,11 @@
+pip install streamlit pandas plotly fpdf pillow scikit-learn openpyxl kaleido
+
+git clone https://github.com/carlinhosg7/streamlit02
+
+
+
+
+@echo off
+cd /d C:\preditiva\PREDITIVA\temp-repo
+streamlit run app6.py
+pause
