@@ -180,8 +180,11 @@ def carregar_dados_processados():
         return df  # ✅ retorno certo aqui
 
     except Exception as e:
-        st.error(f"Erro ao carregar dados: {e}")
-        return pd.DataFrame()  # ✅ retorno de DataFrame vazio, nunca None
+    import traceback
+    st.error("❌ Erro ao carregar dados:")
+    st.code(traceback.format_exc())  # Mostra o erro detalhado com linha e tipo
+    return pd.DataFrame()
+
 
 
         # 🚨 AQUI ENTRA A LÓGICA DE PERFIL ADMIN
