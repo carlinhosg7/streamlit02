@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timedelta
+from datetime import datetime
 from fpdf import FPDF
 import tempfile
 import os
@@ -128,7 +128,7 @@ add_custom_css()
 
 # LOGO KIDY
 logo_kidy = Image.open("logo_kidy.png")
-st.image(logo_kidy, width=100)
+st.image(logo_kidy, width=150)
 
 # DICIONÁRIO MESES
 meses_portugues = {
@@ -137,29 +137,52 @@ meses_portugues = {
     9: 'Setembro', 10: 'Outubro', 11: 'Novembro', 12: 'Dezembro'
 }
 
-# URL do arquivo no GitHub (modo leitura)
-URL_1 = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/refs/heads/main/DADOS_PREDITIVA_1.csv"
-URL_2 = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/refs/heads/main/DADOS_PREDITIVA_2.csv"
+# URLS DOS ARQUIVOS
+URLS_DADOS = [
+    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_1.csv.gz",
+    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_2.csv.gz",
+    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_3.csv.gz",
+    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_4.csv.gz"
+]
 
-# CARREGAR DADOS
-st.cache_data(ttl=3600)
+
+@st.cache_data(ttl=3600)
 def carregar_dados_processados():
     try:
-        df1 = pd.read_csv(URL_1)
-        df2 = pd.read_csv(URL_2)
-        df = pd.concat([df1, df2], ignore_index=True)
+        dfs = [pd.read_csv(url, encoding='cp1252', sep=';', compression='gzip') for url in URLS_DADOS]
+        df = pd.concat(dfs, ignore_index=True)
+        
 
-        # Padroniza o campo de representante
-        df['Codigo Representante'] = df['Codigo Representante'].astype(str).str.strip().str.lstrip('0')
+        # Converte colunas para tipos eficientes
+        df['Codigo Representante'] = df['Codigo Representante'].astype(str).str.strip().str.lstrip("0").astype("category")
+        df['Codigo Supervisor'] = df['Codigo Supervisor'].astype(str).str.strip().astype("category")
+        df['Codigo Grupo Cliente'] = df['Codigo Grupo Cliente'].astype(str).str.upper().astype("category")
+        df['Codigo Cliente'] = df['Codigo Cliente'].astype(str).str.upper().astype("category")
+        df['Grupo Cliente'] = df['Grupo Cliente'].astype(str).str.strip().astype("category")
+        df['Razao Social'] = df['Razao Social'].astype(str).str.strip().astype("category")
+        df['Linha'] = df['Linha'].astype(str).str.strip().astype("category")
 
-        # Outros tratamentos das colunas
         df['Data Cadastro'] = pd.to_datetime(df['Data Cadastro'], errors='coerce')
         df['Data Ultima Compra'] = pd.to_datetime(df['Data Ultima Compra'], errors='coerce')
-        df['Codigo Grupo Cliente'] = df['Codigo Grupo Cliente'].astype(str).str.upper()
-        df['Codigo Cliente'] = df['Codigo Cliente'].astype(str).str.upper()
-        df['Preço Médio Produto'] = df.apply(
-            lambda row: row['Vlr Venda'] / row['Qtd Venda'] if row['Qtd Venda'] > 0 else 0, axis=1
-        )
+
+        df['Qtd Venda'] = pd.to_numeric(df['Qtd Venda'], errors='coerce').fillna(0).astype('int32')
+        df['Vlr Venda'] = pd.to_numeric(df['Vlr Venda'], errors='coerce').fillna(0).astype('float32')
+
+        # Cálculo vetorizado sem apply
+        df['Preço Médio Produto'] = df['Vlr Venda'] / df['Qtd Venda'].replace(0, pd.NA)
+        df['Preço Médio Produto'] = df['Preço Médio Produto'].fillna(0).round(2)
+
+        # Filtro por representante logado (exceto admin)
+        codigo_representante = str(st.session_state.get('codigo_representante', '')).strip().lower().lstrip('0')
+        if codigo_representante and codigo_representante != 'admin':
+            df = df[df['Codigo Representante'] == codigo_representante]
+
+        return df  # ✅ retorno certo aqui
+
+    except Exception as e:
+        st.error(f"Erro ao carregar dados: {e}")
+        return pd.DataFrame()  # ✅ retorno de DataFrame vazio, nunca None
+
 
         # 🚨 AQUI ENTRA A LÓGICA DE PERFIL ADMIN
         codigo_representante = str(st.session_state.get('codigo_representante', '')).strip().lower().lstrip('0')
@@ -177,45 +200,21 @@ def carregar_dados_processados():
         else:
             st.markdown(f"🆔 **Representante:** {codigo_representante_logado}")
 
-## Score RFV
-from datetime import datetime
-import pandas as pd
 
-# ✅ Função que calcula Recência e Frequência com base no histórico completo
-# e Valor com base nos 12 meses anteriores à última compra
+# RFV SCORE
 def calcular_rfv_individual(dados_filtrados):
     hoje = datetime.today()
 
-    # Última compra no histórico completo
-    if not dados_filtrados['Data Ultima Compra'].empty:
-        data_ultima_compra = dados_filtrados['Data Ultima Compra'].max()
-        recencia = (hoje - data_ultima_compra).days
-    else:
-        data_ultima_compra = None
-        recencia = 999
-
-    # Frequência no histórico completo
+    recencia = (hoje - dados_filtrados['Data Ultima Compra'].max()).days if pd.notnull(dados_filtrados['Data Ultima Compra'].max()) else 999
     frequencia = dados_filtrados['Data Cadastro'].nunique()
+    valor = dados_filtrados['Vlr Venda'].sum()
 
-    # Valor dos 12 meses anteriores à última compra
-    if data_ultima_compra:
-        data_inicio = data_ultima_compra - pd.DateOffset(months=12)
-        dados_valor = dados_filtrados[
-            (dados_filtrados['Data Ultima Compra'] >= data_inicio) &
-            (dados_filtrados['Data Ultima Compra'] <= data_ultima_compra)
-        ]
-        valor = dados_valor['Vlr Venda'].sum()
-    else:
-        valor = 0
-
-    # Score RFV
-    recencia_score = 5 if recencia <= 30 else 4 if recencia <= 90 else 3 if recencia <= 180 else 2 if recencia <= 365 else 1
-    frequencia_score = 5 if frequencia >= 12 else 4 if frequencia >= 6 else 3 if frequencia >= 3 else 2 if frequencia >= 1 else 1
+    recencia_score = 5 if recencia <= 60 else 4 if recencia <= 120 else 3 if recencia <= 180 else 2 if recencia <= 365 else 1
+    frequencia_score = 5 if frequencia >= 7 else 4 if frequencia >= 6 else 3 if frequencia >= 4 else 2 if frequencia >= 2 else 1
     valor_score = 5 if valor >= 50000 else 4 if valor >= 20000 else 3 if valor >= 10000 else 2 if valor >= 5000 else 1
 
     rfv_score = f"{recencia_score}{frequencia_score}{valor_score}"
 
-    # Classificação final
     if rfv_score == '555':
         classificacao = 'Cliente VIP'
     elif recencia_score >= 4 and frequencia_score >= 4:
@@ -230,8 +229,7 @@ def calcular_rfv_individual(dados_filtrados):
         'Frequência (pedidos únicos)': frequencia,
         'Valor Total (R$)': f"{valor:,.2f}",
         'RFV Score': rfv_score,
-        'Classificação': classificacao,
-        'Última Compra': data_ultima_compra.strftime('%d/%m/%Y') if data_ultima_compra else 'Sem registro'
+        'Classificação': classificacao
     }
 
 # CARREGA DADOS
@@ -247,11 +245,11 @@ st.sidebar.header("🔧 Filtros de Análise")
 
 # Opções formatadas para busca com nome
 opcoes_grupo_cliente = df[['Codigo Grupo Cliente', 'Grupo Cliente']].drop_duplicates()
-opcoes_grupo_cliente['Busca'] = opcoes_grupo_cliente['Codigo Grupo Cliente'] + ' - ' + opcoes_grupo_cliente['Grupo Cliente']
+opcoes_grupo_cliente['Busca'] = opcoes_grupo_cliente['Codigo Grupo Cliente'].astype(str) + ' - ' + opcoes_grupo_cliente['Grupo Cliente'].astype(str)
 busca_grupo = st.sidebar.selectbox("🔍 Buscar Grupo Cliente:", [''] + sorted(opcoes_grupo_cliente['Busca'].tolist()))
 
 opcoes_cliente = df[['Codigo Cliente', 'Razao Social']].drop_duplicates()
-opcoes_cliente['Busca'] = opcoes_cliente['Codigo Cliente'] + ' - ' + opcoes_cliente['Razao Social']
+opcoes_cliente['Busca'] = opcoes_cliente['Codigo Cliente'].astype(str) + ' - ' + opcoes_cliente['Razao Social'].astype(str)
 busca_cliente = st.sidebar.selectbox("🔍 Buscar Cliente:", [''] + sorted(opcoes_cliente['Busca'].tolist()))
 
 # Extrair apenas os códigos selecionados
@@ -364,72 +362,71 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
 
                 st.success(f"📦 Total de Itens Vendidos: {vendas_totais:,} unidades")
                 
-                # --- ANÁLISE DAS 3 ÚLTIMAS COLEÇÕES (MOSTRA VIGENTE SE ZERADA) ---
-                st.markdown("### 👟 Vendas das 3 Últimas Coleções (Pares, Valores e Período)")
+                # --- ANÁLISE DAS 3 ÚLTIMAS COLEÇÕES (INCLUINDO VIGENTE) ---
+                st.markdown("### 👟 Vendas das 3 Últimas Coleções (Pares e Valores)")
 
                 from datetime import datetime
 
-                # Função para identificar a coleção
+                # 🔁 Função para identificar a coleção com base na nova regra
                 def identificar_colecao(data):
                     if pd.isnull(data):
                         return None
-                    ano = data.year
                     mes = data.month
-                    if 5 <= mes <= 10:
+                    ano = data.year
+
+                    if 5 <= mes <= 10:  # Verão: maio a outubro
                         return f"Verão {ano}"
-                    elif mes >= 11:
+                    elif 11 <= mes <= 12:  # Inverno: novembro e dezembro → pertence ao ano seguinte
                         return f"Inverno {ano + 1}"
-                    else:
+                    else:  # Inverno: janeiro a abril → permanece no mesmo ano
                         return f"Inverno {ano}"
 
-                # Data de hoje
+                # 📆 Determina a coleção vigente com base na data atual
                 hoje = datetime.today()
-                ano = hoje.year
                 mes = hoje.month
+                ano = hoje.year
 
-                colecao_vigente = (
-                    f"Verão {ano}" if 5 <= mes <= 10 else
-                    f"Inverno {ano + 1}" if mes >= 11 else
-                    f"Inverno {ano}"
-                )
-
-                # Aplica coleção
+                if 5 <= mes <= 10:
+                    colecao_vigente = f"Verão {ano}"
+                elif 11 <= mes <= 12:
+                    colecao_vigente = f"Inverno {ano + 1}"
+                else:
+                    colecao_vigente = f"Inverno {ano}"
+               
+                # ✅ Aplica a classificação de coleção
                 dados_filtrados['Colecao'] = dados_filtrados['Data Cadastro'].apply(identificar_colecao)
 
-                # Agrupa dados
+                # 📊 Agrupamento por coleção com data mínima e máxima
                 vendas_colecao = dados_filtrados.groupby('Colecao').agg({
                     'Qtd Venda': 'sum',
                     'Vlr Venda': 'sum',
                     'Data Cadastro': ['min', 'max']
                 }).reset_index()
+
+                # Renomeia colunas após agregação múltipla
                 vendas_colecao.columns = ['Colecao', 'Qtd Venda', 'Vlr Venda', 'Data Inicial', 'Data Final']
 
-                # Garante presença da vigente
+                # 🔢 Extrai o ano da coleção
+                vendas_colecao['Ano'] = vendas_colecao['Colecao'].str.extract(r'(\d{4})').astype(int)
+
+                # ✅ Garante presença da coleção vigente
                 if colecao_vigente not in vendas_colecao['Colecao'].values:
-                    vendas_colecao = pd.concat([
-                        vendas_colecao,
-                        pd.DataFrame({
-                            'Colecao': [colecao_vigente],
-                            'Qtd Venda': [0],
-                            'Vlr Venda': [0.0],
-                            'Data Inicial': [hoje],
-                            'Data Final': [hoje]
-                        })
-                    ], ignore_index=True)
+                    linha_vigente = pd.DataFrame({
+                        'Colecao': [colecao_vigente],
+                        'Qtd Venda': [0],
+                        'Vlr Venda': [0.0],
+                        'Data Inicial': [hoje],
+                        'Data Final': [hoje],
+                        'Ano': [int(colecao_vigente.split()[1])]
+                    })
+                    vendas_colecao = pd.concat([linha_vigente, vendas_colecao], ignore_index=True)
 
-                # Separa 3 últimas coleções reais (com venda > 0), pela Data Final
-                colecoes_reais = vendas_colecao[vendas_colecao['Qtd Venda'] > 0].sort_values(
-                    by='Data Final', ascending=False
-                ).drop_duplicates('Colecao').head(3)
+                # 🔝 Seleciona as 3 últimas coleções mais recentes com base na Data Final
+                colecoes_exibir = vendas_colecao.copy()
+                colecoes_exibir['Data Final'] = pd.to_datetime(colecoes_exibir['Data Final'])
+                colecoes_exibir = colecoes_exibir.sort_values(by='Data Final', ascending=False).drop_duplicates('Colecao').head(3)
 
-                # Se vigente ainda não estiver entre as 3, adiciona no fim
-                if colecao_vigente not in colecoes_reais['Colecao'].values:
-                    vigente = vendas_colecao[vendas_colecao['Colecao'] == colecao_vigente]
-                    colecoes_exibir = pd.concat([colecoes_reais, vigente], ignore_index=True)
-                else:
-                    colecoes_exibir = colecoes_reais.copy()
-
-                # Formata os campos
+                # 💰 Formata os campos
                 colecoes_exibir['Pares Vendidos'] = colecoes_exibir['Qtd Venda'].astype(int)
                 colecoes_exibir['Valor Vendido (R$)'] = colecoes_exibir['Vlr Venda'].apply(
                     lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -438,14 +435,14 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                     lambda row: f"{row['Data Inicial'].strftime('%d/%m/%Y')} a {row['Data Final'].strftime('%d/%m/%Y')}", axis=1
                 )
 
-                # Exibe
-                tabela_final = colecoes_exibir[['Colecao', 'Pares Vendidos', 'Valor Vendido (R$)', 'Período da Coleta']]
-                tabela_final.columns = ['Coleção', 'Pares Vendidos', 'Valor Vendido (R$)', 'Período da Coleta']
-                st.table(tabela_final)
+                # Seleciona e renomeia colunas finais
+                colecoes_exibir = colecoes_exibir[['Colecao', 'Pares Vendidos', 'Valor Vendido (R$)', 'Período da Coleta']]
+                colecoes_exibir.columns = ['Coleção', 'Pares Vendidos', 'Valor Vendido (R$)', 'Período da Coleta']
 
-                # Descritivo opcional
-                for _, row in tabela_final.iterrows():
-                    st.markdown(f"🔎 **{row['Coleção']}** analisada no período de **{row['Período da Coleta']}**")
+                # 📋 Exibe na interface
+                st.table(colecoes_exibir)
+
+
 
 
 
@@ -651,7 +648,6 @@ if st.session_state.get("pdf_ready", False):
 
 
             # Início do PDF
-
             pdf = FPDF()
             pdf.set_auto_page_break(auto=True, margin=15)
             pdf.add_page()
