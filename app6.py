@@ -180,10 +180,10 @@ def carregar_dados_processados():
         return df  # ✅ retorno certo aqui
 
     except Exception as e:
-    import traceback
-    st.error("❌ Erro ao carregar dados:")
-    st.code(traceback.format_exc())  # Mostra o erro detalhado com linha e tipo
-    return pd.DataFrame()
+        import traceback
+        st.error("❌ Erro ao carregar dados:")
+        st.code(traceback.format_exc())  # Mostra o erro detalhado com linha e tipo
+        return pd.DataFrame()
 
 
 
