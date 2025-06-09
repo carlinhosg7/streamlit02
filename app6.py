@@ -16,6 +16,7 @@ import kaleido # força o loading do kaleido para evitar erro de importação
 pio.kaleido.scope.default_format = "png"
 import plotly.express as px
 import unicodedata
+import numpy as np
 
 # 🔐 FUNÇÃO DE AUTENTICAÇÃO
 def autenticar_usuario_excel(caminho_arquivo):
@@ -467,9 +468,115 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 )
                 fig_top_linhas.update_traces(textposition='outside')
                 st.plotly_chart(fig_top_linhas)
-                
-                
 
+#########
+                # ======================
+                # 🧾 Comparativo de Linhas e Categorias - Não Compradas
+                # ======================
+                import unicodedata  # Para normalização dos nomes das colunas
+
+                st.markdown("## 🧾 Linhas e Categorias que o Cliente Ainda Não Comprou")
+
+                # 🔽 Carrega CSV com todas as linhas possíveis
+                URL_LINHAS = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/refs/heads/main/DADOS_PREDITIVA_LINHAS.csv"
+                linhas_possiveis = pd.read_csv(URL_LINHAS, encoding="latin1", sep=";")
+
+                # 🧹 Normaliza os nomes das colunas
+                linhas_possiveis.columns = [col.strip().lower().replace(" ", "_") for col in linhas_possiveis.columns]
+                linhas_possiveis = linhas_possiveis.drop_duplicates(subset=["linha"])
+
+                # ✅ Linhas compradas pelo cliente
+                linhas_compradas = dados_filtrados[dados_filtrados["Qtd Venda"] > 0]["Linha"].dropna().astype(str)
+                linhas_compradas = linhas_compradas.str.strip().str.upper().unique()
+
+                # 🔍 Padroniza colunas para comparação
+                linhas_possiveis['linha'] = linhas_possiveis['linha'].astype(str).str.strip().str.upper()
+                linhas_nao_compradas = linhas_possiveis[~linhas_possiveis["linha"].isin(linhas_compradas)].copy()
+                linhas_nao_compradas['codigo_linha'] = linhas_nao_compradas['codigo_linha'].astype(str).str.strip()
+
+                # 🧠 Salva para uso futuro
+                st.session_state["linhas_nao_compradas"] = linhas_nao_compradas[["codigo_linha", "linha"]]
+
+                # ================
+                # 🔄 Categorias Não Compradas
+                # ================
+                try:
+                    df_categorias = pd.read_csv(
+                        "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/CATEGORIAS.csv",
+                        encoding="latin1",
+                        sep=";"
+                    )
+                except Exception as e:
+                    st.error(f"Erro ao carregar o arquivo CATEGORIAS.csv: {e}")
+                    st.stop()
+
+                # 🧹 Normaliza nomes das colunas
+                df_categorias.columns = [
+                    unicodedata.normalize('NFKD', col).encode('ASCII', 'ignore').decode('utf-8').strip().lower().replace(" ", "_")
+                    for col in df_categorias.columns
+                ]
+
+                # ✅ Verifica colunas obrigatórias
+                for col in ["categorias", "codigo_linha"]:
+                    if col not in df_categorias.columns:
+                        st.error(f"❌ A coluna '{col}' não foi encontrada no arquivo CATEGORIAS.csv.")
+                        st.stop()
+
+                # 🔧 Padroniza os valores
+                df_categorias['categorias'] = df_categorias['categorias'].astype(str).str.strip().str.upper()
+                df_categorias['codigo_linha'] = df_categorias['codigo_linha'].astype(str).str.strip()
+
+                # 🔗 Junta com as linhas não compradas
+                linhas_nao_compradas_merge = st.session_state["linhas_nao_compradas"].copy()
+                linhas_nao_compradas_merge['codigo_linha'] = linhas_nao_compradas_merge['codigo_linha'].astype(str).str.strip()
+
+                linhas_nao_compradas_categorias = pd.merge(
+                    linhas_nao_compradas_merge,
+                    df_categorias,
+                    on="codigo_linha",
+                    how="left"
+                )
+
+                # 🧽 Categorias únicas
+                categorias_nao_compradas = (
+                    linhas_nao_compradas_categorias[["categorias"]]
+                    .dropna()
+                    .drop_duplicates()
+                    .sort_values(by="categorias")
+                    .reset_index(drop=True)
+                )
+
+                # 🧠 Salva para uso no PDF
+                st.session_state["categorias_nao_compradas"] = categorias_nao_compradas
+
+                
+                # 🧠 Salva para uso no PDF
+                st.session_state["categorias_nao_compradas"] = categorias_nao_compradas
+
+                # ======================
+                # 📊 Exibição Lado a Lado
+                # ======================
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("### 📄 Linhas que o Cliente Ainda Não Comprou")
+                    if linhas_nao_compradas.empty:
+                        st.success("✅ O cliente comprou todas as linhas.")
+                    else:
+                        st.dataframe(linhas_nao_compradas[["codigo_linha", "linha"]].sort_values(by="linha"))
+
+                with col2:
+                    st.markdown("### 📑 Categorias que o Cliente Ainda Não Comprou")
+                    if categorias_nao_compradas.empty:
+                        st.success("✅ O cliente comprou todas as categorias.")
+                    else:
+                        st.dataframe(categorias_nao_compradas)
+
+
+
+
+
+#######
                 # MACHINE LEARNING
                 st.subheader("🤖 Previsão de Linhas para Oferta (Machine Learning)")
 
@@ -486,10 +593,23 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
 
                 dados_ml = preparar_dados_ml(df)
                 progress_bar.progress(20, text="✅ Etapa 1: Dados preparados (20%)")
+    
 
-                # Etapa 2: Treinar modelo
+
+                # Etapa 2: Treinar modelo com validação de dados
                 @st.cache_resource
                 def treinar_modelo_rf(df_ml):
+                    import numpy as np
+                    from sklearn.ensemble import RandomForestClassifier
+                    from sklearn.model_selection import train_test_split
+                    from sklearn.preprocessing import LabelEncoder
+                    from sklearn.metrics import accuracy_score
+
+                    # 🔻 Amostragem para acelerar
+                    if len(df_ml) > 5000:
+                        df_ml = df_ml.sample(5000, random_state=42)
+
+                    # 🔄 Codifica variáveis
                     le_grupo = LabelEncoder().fit(df_ml['Codigo Grupo Cliente'])
                     le_cliente = LabelEncoder().fit(df_ml['Codigo Cliente'])
                     le_linha = LabelEncoder().fit(df_ml['Linha'])
@@ -498,75 +618,101 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                     df_ml['Cliente_Code'] = le_cliente.transform(df_ml['Codigo Cliente'])
                     df_ml['Linha_Code'] = le_linha.transform(df_ml['Linha'])
 
+                    # 🎯 Define X e y
+                    df_ml = df_ml[['Grupo_Code', 'Cliente_Code', 'Linha_Code', 'Mes Pedido', 'Compra']]
+                    df_ml.replace([np.inf, -np.inf], np.nan, inplace=True)
+                    df_ml.dropna(inplace=True)
+
                     X = df_ml[['Grupo_Code', 'Cliente_Code', 'Linha_Code', 'Mes Pedido']]
                     y = df_ml['Compra']
 
+                    # 🔀 Split
                     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-                    modelo = RandomForestClassifier(n_estimators=100, random_state=42)
+
+                    # ✅ Limpeza pós-split (reforço extra)
+                    for df in [X_train, X_test]:
+                        df.replace([np.inf, -np.inf], np.nan, inplace=True)
+                        df.dropna(inplace=True)
+
+                    y_train = y_train.loc[X_train.index]
+                    y_test = y_test.loc[X_test.index]
+
+                    if X_train.empty or y_train.empty:
+                        st.error("❌ Treinamento falhou: X_train ou y_train vazio após limpeza.")
+                        st.stop()
+
+                    if X_test.empty or y_test.empty:
+                        st.error("❌ Avaliação falhou: X_test ou y_test vazio após limpeza.")
+                        st.stop()
+
+                    # ⚡ Modelo mais leve
+                    modelo = RandomForestClassifier(n_estimators=30, max_depth=10, random_state=42)
                     modelo.fit(X_train, y_train)
+
                     acc = accuracy_score(y_test, modelo.predict(X_test))
 
                     return modelo, le_grupo, le_cliente, le_linha, acc
 
+
+                # ✅ CHAMADA DO TREINAMENTO (fora da função)
                 modelo_rf, le_grupo, le_cliente, le_linha, acc = treinar_modelo_rf(dados_ml)
-                progress_bar.progress(50, text="✅ Etapa 2: Modelo treinado (50%)")
-
-#######
-
-                 # 🧾 Comparativo de Linhas - Somente Não Compradas
-                st.markdown("### 🧾 Linhas que o Cliente Ainda Não Comprou")
-
-                # 🔽 Carrega CSV com as linhas possíveis
-                URL_LINHAS = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/refs/heads/main/DADOS_PREDITIVA_LINHAS.csv"
-                linhas_possiveis = pd.read_csv(URL_LINHAS, encoding="latin1", sep=";")
-
-                # 🧹 Normaliza os nomes das colunas
-                linhas_possiveis.columns = [col.strip().lower().replace(" ", "_") for col in linhas_possiveis.columns]
-
-                # 🔁 Remove duplicadas por linha
-                linhas_possiveis = linhas_possiveis.drop_duplicates(subset=["linha"])
-
-                # ✅ Linhas compradas pelo cliente no período
-                linhas_compradas = dados_filtrados[dados_filtrados["Qtd Venda"] > 0]["Linha"].unique()
-                linhas_nao_compradas = linhas_possiveis[~linhas_possiveis["linha"].isin(linhas_compradas)]
-
-                # 🧠 Armazena para uso no PDF
-                st.session_state["linhas_nao_compradas"] = linhas_nao_compradas[["codigo_linha", "linha"]]
-
-                
-                # 🧾 Exibir apenas código da linha e nome da linha
-                st.dataframe(
-                    linhas_nao_compradas[["codigo_linha", "linha"]].sort_values(by="linha")
-                )
-
                 st.info(f"🧠 Acurácia do modelo: {acc:.2%}")
-                
-                # Etapa 3: Preparar dados para predição
-                grupo_id = codigo_grupo_cliente or dados_filtrados['Codigo Grupo Cliente'].iloc[0]
-                cliente_id = codigo_cliente or dados_filtrados['Codigo Cliente'].iloc[0]
+
+              
+                # Etapa 3: Preparar dados para predição com validação
+                from datetime import datetime
+
+                # 🔐 Define lista de clientes e grupos treinados
+                clientes_treinados = list(le_cliente.classes_)
+                grupos_treinados = list(le_grupo.classes_)
+
+                # 🟨 Seleciona cliente e grupo de forma segura
+                grupo_id = codigo_grupo_cliente if codigo_grupo_cliente in grupos_treinados else next(
+                    (g for g in dados_filtrados['Codigo Grupo Cliente'] if g in grupos_treinados), None)
+
+                cliente_id = codigo_cliente if codigo_cliente in clientes_treinados else next(
+                    (c for c in dados_filtrados['Codigo Cliente'] if c in clientes_treinados), None)
+
+                # 🚫 Validação: se cliente ou grupo ainda estiver inválido, para tudo
+                if not grupo_id or not cliente_id:
+                    st.error("❌ Grupo ou cliente não encontrado nos dados de treinamento.")
+                    st.stop()
+
+                # 📦 Coleta as linhas únicas da base atual
                 linhas_possiveis = df['Linha'].unique()
                 mes_atual = datetime.now().month
 
                 try:
+                    # 🔍 Filtra apenas linhas que o encoder conhece
+                    linhas_validas = [linha for linha in linhas_possiveis if linha in le_linha.classes_]
+                    if not linhas_validas:
+                        st.error("❌ Nenhuma linha válida encontrada para previsão.")
+                        st.stop()
+
+                    # ⚙️ Monta DataFrame para predição
                     dados_para_prever = pd.DataFrame({
-                        'Grupo_Code': le_grupo.transform([grupo_id] * len(linhas_possiveis)),
-                        'Cliente_Code': le_cliente.transform([cliente_id] * len(linhas_possiveis)),
-                        'Linha_Code': le_linha.transform(linhas_possiveis),
-                        'Mes Pedido': [mes_atual] * len(linhas_possiveis)
+                        'Grupo_Code': le_grupo.transform([grupo_id] * len(linhas_validas)),
+                        'Cliente_Code': le_cliente.transform([cliente_id] * len(linhas_validas)),
+                        'Linha_Code': le_linha.transform(linhas_validas),
+                        'Mes Pedido': [mes_atual] * len(linhas_validas)
                     })
+
                     progress_bar.progress(70, text="✅ Etapa 3: Dados para predição gerados (70%)")
 
+                    # 🤖 Aplica o modelo
                     probs = modelo_rf.predict_proba(dados_para_prever)[:, 1]
 
                     df_preds = pd.DataFrame({
-                        'Linha': linhas_possiveis,
+                        'Linha': linhas_validas,
                         'Probabilidade de Compra': probs
                     }).sort_values(by='Probabilidade de Compra', ascending=False)
 
                     progress_bar.progress(100, text="✅ Etapa 4: Predição finalizada (100%)")
-
                     st.success("🎉 Predição realizada com sucesso!")
                     st.table(df_preds.head(10))
+
+                    # 💾 Armazena para PDF ou relatórios
+                    st.session_state['top_linhas'] = df_preds.head(10)
 
                 except ValueError as e:
                     st.warning(f"⚠️ Erro ao prever: {e}. Verifique se o código do cliente ou grupo existe nos dados.")
@@ -583,7 +729,7 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 top10_periodo = dados_filtrados.groupby('Linha')['Qtd Venda'].sum().reset_index().sort_values(by='Qtd Venda', ascending=False).head(10)
                 fig5 = px.bar(top10_periodo, x='Linha', y='Qtd Venda', color='Linha', text='Qtd Venda', title="🏆 Top 10 Linhas Mais Vendidas no Período")
 
-                for fig in [fig1, fig2, fig3, fig4, fig5]:
+                for fig in [fig1, fig2, fig3, fig4]:
                     fig.update_traces(textposition='outside')
                     st.plotly_chart(fig)
                 # 🔐 Armazena resultados no session_state para uso posterior (como PDF)
@@ -651,6 +797,7 @@ if st.session_state.get("pdf_ready", False):
 
 
             # Início do PDF
+
             pdf = FPDF()
             pdf.set_auto_page_break(auto=True, margin=15)
             pdf.add_page()
@@ -744,6 +891,22 @@ if st.session_state.get("pdf_ready", False):
             for _, row in st.session_state['top_linhas'].iterrows():
                 pdf.cell(0, 10, f"{row['Linha']}: {int(row['Quantidade Vendida'])} unidades", ln=True)
             pdf.ln(10)
+            
+            # 🧾 Categorias Não Compradas
+            categorias = st.session_state.get("categorias_nao_compradas", pd.DataFrame())
+
+            if not categorias.empty:
+                pdf.set_font("Arial", "B", 12)
+                pdf.cell(0, 10, "Categorias que o Cliente Ainda Não Comprou", ln=True)
+
+                pdf.set_font("Arial", "", 10)
+                for i, row in categorias.iterrows():
+                    categoria = row["categorias"]
+                    pdf.cell(0, 8, f"• {categoria}", ln=True)
+            else:
+                pdf.set_font("Arial", "I", 10)
+                pdf.cell(0, 8, "Todas as categorias já foram compradas.", ln=True)
+
 
             # ➕ Tabela de Linhas Não Compradas
             if "linhas_nao_compradas" in st.session_state:
