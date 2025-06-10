@@ -414,9 +414,7 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
 
 
                 # 📊 Agrupamento por coleção com data mínima e máxima
-                st.subheader("🔍 DEBUG: Verificando dados filtrados antes do agrupamento")
-                st.dataframe(dados_filtrados[['Codigo Cliente', 'Data Cadastro', 'Qtd Venda', 'Vlr Venda', 'Preço Médio Produto']].sort_values(by='Data Cadastro', ascending=False).head(10))
-
+                
                 # 🔧 Corrige valor vendido quando Vlr Venda está zerado
                 dados_filtrados['Vlr Venda Corrigido'] = dados_filtrados['Qtd Venda'] * dados_filtrados['Preço Médio Produto']
 
