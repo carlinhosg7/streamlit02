@@ -365,7 +365,7 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                     """, unsafe_allow_html=True)
 
                 st.success(f"📦 Total de Itens Vendidos: {vendas_totais:,} unidades")
-                
+   ####################             
                 # --- ANÁLISE DAS 3 ÚLTIMAS COLEÇÕES (INCLUINDO VIGENTE) ---
                 st.markdown("### 👟 Vendas das 3 Últimas Coleções (Pares e Valores)")
 
@@ -396,14 +396,33 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                     colecao_vigente = f"Inverno {ano + 1}"
                 else:
                     colecao_vigente = f"Inverno {ano}"
+                
+                # 🔧 Garante que os códigos batem corretamente para cliente individual
+                df['Codigo Cliente'] = df['Codigo Cliente'].astype(str).str.upper().str.strip()
+                codigo_cliente = codigo_cliente.strip().upper()
+
+                # 🔍 Reaplica o filtro por cliente, se estiver definido
+                if codigo_cliente:
+                    dados_filtrados = dados_filtrados[dados_filtrados['Codigo Cliente'].astype(str).str.upper().str.strip() == codigo_cliente.strip().upper()]
+
+
                
                 # ✅ Aplica a classificação de coleção
                 dados_filtrados['Colecao'] = dados_filtrados['Data Cadastro'].apply(identificar_colecao)
+                
+
+
 
                 # 📊 Agrupamento por coleção com data mínima e máxima
+                st.subheader("🔍 DEBUG: Verificando dados filtrados antes do agrupamento")
+                st.dataframe(dados_filtrados[['Codigo Cliente', 'Data Cadastro', 'Qtd Venda', 'Vlr Venda', 'Preço Médio Produto']].sort_values(by='Data Cadastro', ascending=False).head(10))
+
+                # 🔧 Corrige valor vendido quando Vlr Venda está zerado
+                dados_filtrados['Vlr Venda Corrigido'] = dados_filtrados['Qtd Venda'] * dados_filtrados['Preço Médio Produto']
+
                 vendas_colecao = dados_filtrados.groupby('Colecao').agg({
                     'Qtd Venda': 'sum',
-                    'Vlr Venda': 'sum',
+                    'Vlr Venda Corrigido': 'sum',
                     'Data Cadastro': ['min', 'max']
                 }).reset_index()
 
@@ -445,6 +464,7 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
 
                 # 📋 Exibe na interface
                 st.table(colecoes_exibir)
+
 
 
 
