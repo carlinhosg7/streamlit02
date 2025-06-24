@@ -397,14 +397,55 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 # st.write("🔍 Preço Médio Produto - Valores únicos:", dados_filtrados['Preço Médio Produto'].unique())
 
 
-                # Converte para numérico
-                dados_filtrados['Qtd Venda'] = pd.to_numeric(dados_filtrados['Qtd Venda'], errors='coerce').fillna(0).astype(float)
-                dados_filtrados['Preço Médio Produto'] = pd.to_numeric(dados_filtrados['Preço Médio Produto'], errors='coerce').fillna(0).astype(float)
+                # Converte corretamente
+                # 🔁 Recalcula preço médio e valor corrigido com fallback
+                dados_filtrados['Qtd Venda'] = pd.to_numeric(dados_filtrados['Qtd Venda'], errors='coerce').fillna(0)
+                dados_filtrados['Vlr Venda'] = pd.to_numeric(dados_filtrados['Vlr Venda'], errors='coerce').fillna(0)
 
-                # Valor corrigido
-                dados_filtrados['Vlr Venda Corrigido'] = dados_filtrados['Qtd Venda'] * dados_filtrados['Preço Médio Produto']
+                # Remove registros negativos
+                dados_filtrados = dados_filtrados[
+                    (dados_filtrados['Qtd Venda'] >= 0) & (dados_filtrados['Vlr Venda'] >= 0)
+                ].copy()
 
-                # Define coleção
+                # Preço médio calculado (referência)
+                dados_filtrados['Preço Médio Produto'] = dados_filtrados.apply(
+                    lambda row: row['Vlr Venda'] / row['Qtd Venda'] if row['Qtd Venda'] > 0 else 0,
+                    axis=1
+                ).round(2)
+
+                # 🔁 Recalcula campos com proteção total
+                dados_filtrados['Qtd Venda'] = pd.to_numeric(dados_filtrados['Qtd Venda'], errors='coerce').fillna(0)
+                dados_filtrados['Vlr Venda'] = pd.to_numeric(dados_filtrados['Vlr Venda'], errors='coerce').fillna(0)
+
+                # Remove valores inválidos
+                dados_filtrados = dados_filtrados[
+                    (dados_filtrados['Qtd Venda'] >= 0) & (dados_filtrados['Vlr Venda'] >= 0)
+                ].copy()
+
+                # Preço médio individual por linha (não usado no total, mas útil para verificação)
+                dados_filtrados['Preço Médio Produto'] = dados_filtrados.apply(
+                    lambda row: row['Vlr Venda'] / row['Qtd Venda'] if row['Qtd Venda'] > 0 else 0,
+                    axis=1
+                ).round(2)
+
+                # 🔍 Calcula média de preço por par com fallback se necessário
+                df_base_preco = dados_filtrados[
+                    (dados_filtrados['Qtd Venda'] > 0) & (dados_filtrados['Vlr Venda'] > 0)
+                ].copy()
+
+                if not df_base_preco.empty:
+                    media_preco_par = df_base_preco.apply(lambda row: row['Vlr Venda'] / row['Qtd Venda'], axis=1).mean()
+                else:
+                    media_preco_par = 60  # 🔧 Valor estimado padrão por par
+                    st.warning(f"⚠️ Nenhuma venda com valor encontrada. Estimativa padrão de R$ {media_preco_par:.2f} por par foi aplicada.")
+
+                # Valor de venda corrigido com fallback
+                dados_filtrados['Vlr Venda Corrigido'] = dados_filtrados.apply(
+                    lambda row: row['Vlr Venda'] if row['Vlr Venda'] > 0 else row['Qtd Venda'] * media_preco_par,
+                    axis=1
+                )
+
+                # Define coleção por regra
                 def identificar_colecao(data):
                     if pd.isnull(data):
                         return None
@@ -419,20 +460,22 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
 
                 dados_filtrados['Colecao'] = dados_filtrados['Data Cadastro'].apply(identificar_colecao)
 
-                # Agrupamento
+                # Agrupamento por coleção
                 vendas_colecao = dados_filtrados.groupby('Colecao').agg({
                     'Qtd Venda': 'sum',
                     'Vlr Venda Corrigido': 'sum',
                     'Data Cadastro': ['min', 'max']
                 }).reset_index()
 
-                # Renomeia colunas
                 vendas_colecao.columns = ['Colecao', 'Qtd Venda', 'Vlr Venda Corrigido', 'Data Inicial', 'Data Final']
-                vendas_colecao['Data Inicial'] = pd.to_datetime(vendas_colecao['Data Inicial'], errors='coerce')
-                vendas_colecao['Data Final'] = pd.to_datetime(vendas_colecao['Data Final'], errors='coerce')
                 vendas_colecao['Ano'] = vendas_colecao['Colecao'].str.extract(r'(\d{4})').astype(int)
 
                 # Garante coleção vigente
+                hoje = datetime.today()
+                mes = hoje.month
+                ano = hoje.year
+                colecao_vigente = f"Verão {ano}" if 5 <= mes <= 10 else f"Inverno {ano + 1}" if mes >= 11 else f"Inverno {ano}"
+
                 if colecao_vigente not in vendas_colecao['Colecao'].values:
                     linha_vigente = pd.DataFrame({
                         'Colecao': [colecao_vigente],
@@ -444,10 +487,10 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                     })
                     vendas_colecao = pd.concat([linha_vigente, vendas_colecao], ignore_index=True)
 
-                # 3 últimas coleções
+                # Últimas 3 coleções
                 colecoes_exibir = vendas_colecao.sort_values(by='Data Final', ascending=False).drop_duplicates('Colecao').head(3)
 
-                # Formatações
+                # Formatação final
                 colecoes_exibir['Pares Vendidos'] = colecoes_exibir['Qtd Venda'].fillna(0).astype(int)
                 colecoes_exibir['Valor Vendido (R$)'] = colecoes_exibir['Vlr Venda Corrigido'].fillna(0).apply(
                     lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -455,17 +498,21 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 colecoes_exibir['Período da Coleta'] = colecoes_exibir.apply(
                     lambda row: (
                         f"{row['Data Inicial'].strftime('%d/%m/%Y')} a {row['Data Final'].strftime('%d/%m/%Y')}"
-                        if pd.notnull(row['Data Inicial']) and pd.notnull(row['Data Final'])
-                        else "Período inválido"
+                        if pd.notnull(row['Data Inicial']) and pd.notnull(row['Data Final']) else "Período inválido"
                     ),
                     axis=1
                 )
 
-                # Exibição
+                # Exibe tabela
                 colecoes_exibir = colecoes_exibir[['Colecao', 'Pares Vendidos', 'Valor Vendido (R$)', 'Período da Coleta']]
                 colecoes_exibir.columns = ['Coleção', 'Pares Vendidos', 'Valor Vendido (R$)', 'Período da Coleta']
                 st.markdown("### 👟 Vendas das 3 Últimas Coleções (Pares e Valores)")
                 st.table(colecoes_exibir)
+
+                # Salva no session_state para PDF/Word
+                st.session_state["colecoes_exibir"] = colecoes_exibir
+
+
 
 #########
                 # ======================
