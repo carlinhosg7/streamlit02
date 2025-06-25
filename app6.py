@@ -68,7 +68,7 @@ def autenticar_usuario_excel(caminho_arquivo):
 # 🎨 CONFIG PÁGINA (PRIMEIRA CHAMADA DO STREAMLIT)
 st.set_page_config(
     page_title="Dashboard Analítico",
-    page_icon="📊",
+    page_icon="https://raw.githubusercontent.com/carlinhosg7/streamlit02/refs/heads/main/logo_kidy_icon.ico",
     layout="wide",
     initial_sidebar_state="expanded"
 )
