@@ -1,3 +1,6 @@
+# ----------------------------
+# ✅ IMPORTS
+# ----------------------------
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -12,18 +15,30 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score
 import time
 import plotly.io as pio
-import kaleido # força o loading do kaleido para evitar erro de importação
-pio.kaleido.scope.default_format = "png"
-import plotly.express as px
+import kaleido  # força o loading do kaleido para evitar erro de exportação
 import unicodedata
 import numpy as np
 from docx import Document
 from docx.shared import Inches
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+import requests
+from io import BytesIO
 
+pio.kaleido.scope.default_format = "png"
 
+# ----------------------------
+# ✅ CONFIGURAÇÃO INICIAL DA PÁGINA (PRIMEIRO COMANDO DO STREAMLIT)
+# ----------------------------
+st.set_page_config(
+    page_title="Dashboard Analítico",
+    page_icon="https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/logo_kidy_icon.ico",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
+# ----------------------------
 # 🔐 FUNÇÃO DE AUTENTICAÇÃO
+# ----------------------------
 def autenticar_usuario_excel(caminho_arquivo):
     try:
         df_usuarios = pd.read_excel(caminho_arquivo, engine="openpyxl")
@@ -52,12 +67,11 @@ def autenticar_usuario_excel(caminho_arquivo):
                         senha_valida = df_usuarios[df_usuarios['usuario'] == usuario]['senha'].values[0]
                         if senha == senha_valida:
                             st.session_state['autenticado'] = True
-                            st.session_state['codigo_representante'] = usuario  # <-- Adicione esta linha
+                            st.session_state['codigo_representante'] = usuario
                             st.success("✅ Login realizado com sucesso!")
                             st.rerun()
                         else:
-                            st.error("❌ Senha incorreta.")  
-
+                            st.error("❌ Senha incorreta.")
         if not st.session_state['autenticado']:
             st.stop()
 
@@ -65,19 +79,25 @@ def autenticar_usuario_excel(caminho_arquivo):
         st.error(f"Erro ao carregar planilha de autenticação: {e}")
         st.stop()
 
-# 🎨 CONFIG PÁGINA (PRIMEIRA CHAMADA DO STREAMLIT)
-st.set_page_config(
-    page_title="Dashboard Analítico",
-    page_icon="https://raw.githubusercontent.com/carlinhosg7/streamlit02/refs/heads/main/logo_kidy_icon.ico",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# 🚀 SÓ DEPOIS AUTENTICAÇÃO
+# ----------------------------
+# 🚀 AUTENTICAÇÃO
+# ----------------------------
 autenticar_usuario_excel("auth.xlsx")
 
+# ----------------------------
+# 🖼️ CARREGA LOGO DA KIDY A PARTIR DO GITHUB
+# ----------------------------
+url_logo = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/logo_kidy.png"
+response = requests.get(url_logo)
+logo_kidy = Image.open(BytesIO(response.content))
 
-st.title("🔓 Dashboard liberado após login")
+# ----------------------------
+# 📊 TÍTULO E SIDEBAR
+# ----------------------------
+st.title("📊 Dashboard Analítico")
+st.sidebar.image(logo_kidy, width=100)
+st.sidebar.header("🔧 Filtros de Análise")
+
 
 # CSS CUSTOMIZADO
 def add_custom_css():
@@ -132,9 +152,12 @@ def add_custom_css():
 
 add_custom_css()
 
-# LOGO KIDY
-logo_kidy = Image.open("logo_kidy.png")
+# LOGO KIDY (a partir do GitHub)
+url_logo = "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/logo_kidy.png"
+response = requests.get(url_logo)
+logo_kidy = Image.open(BytesIO(response.content))
 st.image(logo_kidy, width=150)
+
 
 # DICIONÁRIO MESES
 meses_portugues = {
@@ -216,10 +239,10 @@ df = carregar_dados_processados()
 if df.empty:
     st.stop()
 
-# FILTROS SIDEBAR
-st.title("📊 Dashboard Analítico")
-st.sidebar.image(logo_kidy, width=100)
-st.sidebar.header("🔧 Filtros de Análise")
+# # FILTROS SIDEBAR
+# st.title("📊 Dashboard Analítico")
+# st.sidebar.image(logo_kidy, width=100)
+# st.sidebar.header("🔧 Filtros de Análise")
 
 # Opções formatadas para busca com nome
 opcoes_grupo_cliente = df[['Codigo Grupo Cliente', 'Grupo Cliente']].drop_duplicates()
