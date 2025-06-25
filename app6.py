@@ -23,6 +23,10 @@ from docx.shared import Inches
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 import requests
 from io import BytesIO
+from docx.shared import RGBColor
+from docx.shared import Pt
+from docx.shared import RGBColor, Pt
+
 
 pio.kaleido.scope.default_format = "png"
 
@@ -238,11 +242,6 @@ df = carregar_dados_processados()
 
 if df.empty:
     st.stop()
-
-# # FILTROS SIDEBAR
-# st.title("📊 Dashboard Analítico")
-# st.sidebar.image(logo_kidy, width=100)
-# st.sidebar.header("🔧 Filtros de Análise")
 
 # Opções formatadas para busca com nome
 opcoes_grupo_cliente = df[['Codigo Grupo Cliente', 'Grupo Cliente']].drop_duplicates()
@@ -661,8 +660,14 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 st.session_state["categorias_nao_compradas"] = categorias_nao_compradas
 ################
 
-# BOTÃO DE EXPORTAÇÃO PARA WORD
 
+
+from docx.shared import RGBColor, Pt, Inches
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+import tempfile
+from docx import Document
+
+# BOTÃO DE EXPORTAÇÃO PARA WORD
 if st.session_state.get("nome_grupo") and st.session_state.get("colecoes_exibir") is not None:
 
     if st.button("📄 Exportar para Word"):
@@ -681,9 +686,27 @@ if st.session_state.get("nome_grupo") and st.session_state.get("colecoes_exibir"
             linhas_nao_compradas = st.session_state["linhas_nao_compradas"]
             categorias_nao_compradas = st.session_state["categorias_nao_compradas"]
 
+            # ✅ Função para adicionar título com cor laranja
+            def add_heading_colorido(doc, texto, tamanho=14, cor=RGBColor(255, 102, 0)):
+                paragrafo = doc.add_paragraph()
+                paragrafo.style = None
+                run = paragrafo.add_run(texto)
+                run.font.bold = True
+                run.font.size = Pt(tamanho)
+                run.font.color.rgb = cor
+                paragrafo.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+
             # Criação do documento Word
             doc = Document()
-            doc.add_heading("Relatório Analítico - Kidy", level=1).alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+            paragrafo = doc.add_paragraph()
+            paragrafo.style = None  # remove Heading 1 azul do Word
+            run = paragrafo.add_run("Relatório Analítico - Kidy")
+            run.font.bold = True
+            run.font.size = Pt(18)  # Tamanho maior que os subtítulos
+            run.font.color.rgb = RGBColor(255, 102, 0)
+            paragrafo.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
 
             try:
                 doc.add_picture("logo_kidy.png", width=Inches(1.5))
@@ -699,7 +722,7 @@ if st.session_state.get("nome_grupo") and st.session_state.get("colecoes_exibir"
             doc.add_paragraph(f"⭐ Melhor Mês para Oferta: {melhor_mes_nome}")
 
             # Tabela de Coleções
-            doc.add_heading("👟 Vendas das 3 Últimas Coleções", level=2)
+            add_heading_colorido(doc, "👟 Vendas das 3 Últimas Coleções")
             tabela = doc.add_table(rows=1, cols=4)
             hdr = tabela.rows[0].cells
             hdr[0].text = 'Coleção'
@@ -715,7 +738,7 @@ if st.session_state.get("nome_grupo") and st.session_state.get("colecoes_exibir"
                 linha[3].text = str(row['Período da Coleta'])
 
             # Linhas não compradas
-            doc.add_heading("📄 Linhas que o Cliente Ainda Não Comprou", level=2)
+            add_heading_colorido(doc, "📄 Linhas que o Cliente Ainda Não Comprou")
             if not linhas_nao_compradas.empty:
                 for _, row in linhas_nao_compradas.iterrows():
                     doc.add_paragraph(f"- {row['linha']}")
@@ -723,7 +746,7 @@ if st.session_state.get("nome_grupo") and st.session_state.get("colecoes_exibir"
                 doc.add_paragraph("✅ O cliente comprou todas as linhas.")
 
             # Categorias não compradas
-            doc.add_heading("📑 Categorias que o Cliente Ainda Não Comprou", level=2)
+            add_heading_colorido(doc, "📑 Categorias que o Cliente Ainda Não Comprou")
             if not categorias_nao_compradas.empty:
                 for _, row in categorias_nao_compradas.iterrows():
                     doc.add_paragraph(f"- {row['categorias']}")
