@@ -317,6 +317,9 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 cods_representantes = sorted(cods_representantes)
                 cods_repr_str = ', '.join(cods_representantes)
 
+                # 🔒 Salva o código do representante analisado para nome de arquivo
+                st.session_state["codigo_repr_para_arquivo"] = cods_representantes[0] if len(cods_representantes) == 1 else "_".join(cods_representantes)
+
                 # Extrai e limpa código(s) de supervisor
                 cod_supervisor = dados_filtrados['Codigo Supervisor'].astype(str).str.strip().dropna().unique()
 
@@ -533,6 +536,48 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
 
                 # Salva no session_state para PDF/Word
                 st.session_state["colecoes_exibir"] = colecoes_exibir
+#########
+                # ==========================
+                # 📆 Análise dos Últimos 12 Meses (Quantidade e Valor)
+                # ==========================
+
+                st.markdown("### 📆 Vendas dos Últimos 12 Meses")
+
+                # 🔁 Garante que a data está ok
+                dados_filtrados['AnoMes'] = dados_filtrados['Data Cadastro'].dt.to_period('M')
+                dados_filtrados['AnoMes'] = dados_filtrados['AnoMes'].dt.to_timestamp()
+
+                # 🔢 Agrupa por mês/ano
+                ultimos_12 = (
+                    dados_filtrados
+                    .groupby('AnoMes')
+                    .agg({
+                        'Qtd Venda': 'sum',
+                        'Vlr Venda Corrigido': 'sum'
+                    })
+                    .reset_index()
+                    .sort_values(by='AnoMes', ascending=False)
+                    .head(12)
+                    .sort_values(by='AnoMes')  # volta para ordem cronológica
+                )
+
+                # 📊 Formata os valores
+                ultimos_12['Mês/Ano'] = ultimos_12['AnoMes'].dt.strftime('%b/%Y')
+                ultimos_12['Pares Vendidos'] = ultimos_12['Qtd Venda'].astype(int)
+                ultimos_12['Valor Vendido (R$)'] = ultimos_12['Vlr Venda Corrigido'].apply(
+                    lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                )
+
+                # 🎯 Seleciona colunas finais
+                ultimos_12_meses_df = ultimos_12[['Mês/Ano', 'Pares Vendidos', 'Valor Vendido (R$)']]
+
+                # 💾 Salva no session_state para Word
+                st.session_state["ultimos_12_meses_df"] = ultimos_12_meses_df
+
+                # 🧾 Exibe
+                st.table(ultimos_12_meses_df)
+
+
 
 
 
@@ -654,13 +699,16 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 st.session_state["colecoes_exibir"] = colecoes_exibir
                 st.session_state["linhas_nao_compradas"] = linhas_nao_compradas
                 st.session_state["categorias_nao_compradas"] = categorias_nao_compradas
+                ultimos_12_meses_df = st.session_state.get("ultimos_12_meses_df", pd.DataFrame())
+                st.session_state["codigo_repr_para_arquivo"] = cods_representantes[0]
+
+
+                
 
 
                 st.session_state["linhas_nao_compradas"] = linhas_nao_compradas
                 st.session_state["categorias_nao_compradas"] = categorias_nao_compradas
 ################
-
-
 
 from docx.shared import RGBColor, Pt, Inches
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
@@ -736,6 +784,27 @@ if st.session_state.get("nome_grupo") and st.session_state.get("colecoes_exibir"
                 linha[1].text = str(row['Pares Vendidos'])
                 linha[2].text = str(row['Valor Vendido (R$)'])
                 linha[3].text = str(row['Período da Coleta'])
+                
+                
+                # 🔢 Tabela dos Últimos 12 Meses
+                ultimos_12_meses_df = st.session_state.get("ultimos_12_meses_df", pd.DataFrame())
+
+                if not ultimos_12_meses_df.empty:
+                    add_heading_colorido(doc, "📆 Vendas dos Últimos 12 Meses")
+
+                    tabela_12 = doc.add_table(rows=1, cols=3)
+                    hdr = tabela_12.rows[0].cells
+                    hdr[0].text = 'Mês/Ano'
+                    hdr[1].text = 'Pares Vendidos'
+                    hdr[2].text = 'Valor Vendido (R$)'
+
+                    for _, row in ultimos_12_meses_df.iterrows():
+                        linha = tabela_12.add_row().cells
+                        linha[0].text = str(row['Mês/Ano'])
+                        linha[1].text = str(row['Pares Vendidos'])
+                        linha[2].text = str(row['Valor Vendido (R$)'])
+
+
 
             # Linhas não compradas
             add_heading_colorido(doc, "📄 Linhas que o Cliente Ainda Não Comprou")
@@ -758,14 +827,21 @@ if st.session_state.get("nome_grupo") and st.session_state.get("colecoes_exibir"
                 doc.save(tmp.name)
                 tmp_path = tmp.name
 
+            codigo_repr_para_arquivo = (
+                st.session_state.get("codigo_repr_para_arquivo", "representante")
+                .replace(" ", "_")
+                .lower()
+            )
+
             with open(tmp_path, "rb") as f:
                 st.download_button(
                     label="📥 Baixar Relatório Word",
                     data=f,
-                    file_name="relatorio_analitico_kidy.docx",
+                    file_name=f"Rep_{codigo_repr_para_arquivo}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
 
+                    
 # RODAPÉ
 st.sidebar.markdown("---")
 st.sidebar.caption(f"Relatório gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
