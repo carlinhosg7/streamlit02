@@ -301,6 +301,10 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 dados_filtrados['Ano'] = dados_filtrados['Data Cadastro'].dt.year
                 nome_grupo = dados_filtrados['Grupo Cliente'].iloc[0]
                 total_lojas = dados_filtrados['Codigo Cliente'].nunique()
+                st.session_state["nome_cliente_para_arquivo"] = (
+                    nome_grupo.strip().upper().replace(" ", "_").replace("/", "_")
+                )
+
 
                 # Mapeamento dos supervisores
                 mapa_supervisores = {
@@ -787,25 +791,25 @@ if st.session_state.get("nome_grupo") and st.session_state.get("colecoes_exibir"
                 
                 
                 # 🔢 Tabela dos Últimos 12 Meses
-                ultimos_12_meses_df = st.session_state.get("ultimos_12_meses_df", pd.DataFrame())
+                if "tabela_12_meses_adicionada" not in st.session_state:
+                    ultimos_12_meses_df = st.session_state.get("ultimos_12_meses_df", pd.DataFrame())
 
-                if not ultimos_12_meses_df.empty:
-                    add_heading_colorido(doc, "📆 Vendas dos Últimos 12 Meses")
+                    if not ultimos_12_meses_df.empty:
+                        st.session_state["tabela_12_meses_adicionada"] = True
 
-                    tabela_12 = doc.add_table(rows=1, cols=3)
-                    hdr = tabela_12.rows[0].cells
-                    hdr[0].text = 'Mês/Ano'
-                    hdr[1].text = 'Pares Vendidos'
-                    hdr[2].text = 'Valor Vendido (R$)'
+                        add_heading_colorido(doc, "📆 Vendas dos Últimos 12 Meses")
 
-                    for _, row in ultimos_12_meses_df.iterrows():
-                        linha = tabela_12.add_row().cells
-                        linha[0].text = str(row['Mês/Ano'])
-                        linha[1].text = str(row['Pares Vendidos'])
-                        linha[2].text = str(row['Valor Vendido (R$)'])
+                        tabela_12 = doc.add_table(rows=1, cols=3)
+                        hdr = tabela_12.rows[0].cells
+                        hdr[0].text = 'Mês/Ano'
+                        hdr[1].text = 'Pares Vendidos'
+                        hdr[2].text = 'Valor Vendido (R$)'
 
-
-
+                        for _, row in ultimos_12_meses_df.iterrows():
+                            linha = tabela_12.add_row().cells
+                            linha[0].text = str(row['Mês/Ano'])
+                            linha[1].text = str(row['Pares Vendidos'])
+                            linha[2].text = str(row['Valor Vendido (R$)'])
             # Linhas não compradas
             add_heading_colorido(doc, "📄 Linhas que o Cliente Ainda Não Comprou")
             if not linhas_nao_compradas.empty:
@@ -833,14 +837,17 @@ if st.session_state.get("nome_grupo") and st.session_state.get("colecoes_exibir"
                 .lower()
             )
 
+            nome_cliente = st.session_state.get("nome_cliente_para_arquivo", "cliente")
+
+            file_name = f"{nome_cliente}_Rep_{codigo_repr_para_arquivo}.docx"
+
             with open(tmp_path, "rb") as f:
                 st.download_button(
                     label="📥 Baixar Relatório Word",
                     data=f,
-                    file_name=f"Rep_{codigo_repr_para_arquivo}.docx",
+                    file_name=file_name,
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
-
                     
 # RODAPÉ
 st.sidebar.markdown("---")
