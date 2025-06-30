@@ -182,9 +182,18 @@ URLS_DADOS = [
 @st.cache_data(ttl=3600)
 def carregar_dados_processados():
     try:
-        dfs = [pd.read_csv(url, encoding='cp1252', sep=';', compression='gzip') for url in URLS_DADOS]
+        dfs = [
+            pd.read_csv(
+                url,
+                encoding='latin1',       # Corrige erro de encoding
+                sep=';',
+                compression='gzip',
+                low_memory=False,
+                dtype={'Prazo Medio': str}  # Evita erro de tipo misto na coluna 12
+            )
+            for url in URLS_DADOS
+        ]
         df = pd.concat(dfs, ignore_index=True)
-        
 
         # Converte colunas para tipos eficientes
         df['Codigo Representante'] = df['Codigo Representante'].astype(str).str.strip().str.lstrip("0").astype("category")
@@ -204,37 +213,23 @@ def carregar_dados_processados():
         # Cálculo vetorizado sem apply
         df['Preço Médio Produto'] = df['Vlr Venda'] / df['Qtd Venda'].replace(0, pd.NA)
         df['Preço Médio Produto'] = df['Preço Médio Produto'].fillna(0).round(2)
-        
-            
-        # Filtro por representante logado (exceto admin)
+
+        # 🚨 Lógica de perfil
         codigo_representante = str(st.session_state.get('codigo_representante', '')).strip().lower().lstrip('0')
         if codigo_representante and codigo_representante != 'admin':
             df = df[df['Codigo Representante'] == codigo_representante]
+            st.markdown(f"🆔 **Representante:** `{codigo_representante.upper()}`")
+        else:
+            st.markdown("🟢 **Modo Admin: Visualizando todos os dados**")
 
-        return df  # ✅ retorno certo aqui
+        return df
 
     except Exception as e:
         import traceback
         st.error("❌ Erro ao carregar dados:")
-        st.code(traceback.format_exc())  # Mostra o erro detalhado com linha e tipo
+        st.code(traceback.format_exc())
         return pd.DataFrame()
 
-      
-        # 🚨 AQUI ENTRA A LÓGICA DE PERFIL ADMIN
-        codigo_representante = str(st.session_state.get('codigo_representante', '')).strip().lower().lstrip('0')
-        if codigo_representante and codigo_representante != 'admin':
-            df = df[df['Codigo Representante'] == codigo_representante]
-
-        return df
-    except Exception as e:
-        st.error(f"Erro ao carregar dados: {e}")
-        return pd.DataFrame()
-        # sse bloco vai exibir um aviso claro no topo do dashboard, indicando se o usuário está como admin (vendo tudo) ou mostrando o código do representante comum.
-        codigo_representante_logado = st.session_state.get('codigo_representante', '')
-        if str(codigo_representante_logado).strip().lower() == 'admin':
-            st.markdown("🟢 **Modo Admin: Visualizando todos os dados**")
-        else:
-            st.markdown(f"🆔 **Representante:** {codigo_representante_logado}")
 
 
 # CARREGA DADOS
