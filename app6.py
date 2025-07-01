@@ -805,21 +805,35 @@ if st.session_state.get("nome_grupo") and st.session_state.get("colecoes_exibir"
                             linha[0].text = str(row['Mês/Ano'])
                             linha[1].text = str(row['Pares Vendidos'])
                             linha[2].text = str(row['Valor Vendido (R$)'])
-            # Linhas não compradas
+            # Tentativa automática de localizar os nomes certos
+            def encontrar_coluna(candidatos, colunas_df):
+                for c in candidatos:
+                    for col in colunas_df:
+                        if c.lower() in col.lower():
+                            return col
+                return None
+
+            # LINHAS NÃO COMPRADAS
             add_heading_colorido(doc, "📄 Linhas que o Cliente Ainda Não Comprou")
+
             if not linhas_nao_compradas.empty:
                 for _, row in linhas_nao_compradas.iterrows():
-                    doc.add_paragraph(f"- {row['linha']}")
+                    codigo = str(row['codigo_linha'])
+                    nome = str(row['linha'])
+                    doc.add_paragraph(f"- {codigo} | {nome}")
             else:
                 doc.add_paragraph("✅ O cliente comprou todas as linhas.")
 
-            # Categorias não compradas
+            # CATEGORIAS NÃO COMPRADAS
             add_heading_colorido(doc, "📑 Categorias que o Cliente Ainda Não Comprou")
+
             if not categorias_nao_compradas.empty:
                 for _, row in categorias_nao_compradas.iterrows():
-                    doc.add_paragraph(f"- {row['categorias']}")
+                    categoria = str(row['categorias'])
+                    doc.add_paragraph(f"- {categoria}")
             else:
                 doc.add_paragraph("✅ O cliente comprou todas as categorias.")
+
 
             # Exportação final
             with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
