@@ -172,32 +172,23 @@ meses_portugues = {
 
 # URLS DOS ARQUIVOS
 URLS_DADOS = [
-    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_1.csv.gz",
-    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_2.csv.gz",
-    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_3.csv.gz",
-    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_4.csv.gz",
-    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_5.csv.gz",
-    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_6.csv.gz"
+    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_1.parquet",
+    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_2.parquet",
+    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_3.parquet",
+    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_4.parquet",
+    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_5.parquet",
+    "https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/DADOS_PREDITIVA_6.parquet"
 ]
 
 
 @st.cache_data(ttl=3600)
 def carregar_dados_processados():
     try:
-        dfs = [
-            pd.read_csv(
-                url,
-                encoding='latin1',       # Corrige erro de encoding
-                sep=';',
-                compression='gzip',
-                low_memory=False,
-                dtype={'Prazo Medio': str}  # Evita erro de tipo misto na coluna 12
-            )
-            for url in URLS_DADOS
-        ]
+        # 🔄 Leitura dos arquivos .parquet
+        dfs = [pd.read_parquet(url) for url in URLS_DADOS]
         df = pd.concat(dfs, ignore_index=True)
 
-        # Converte colunas para tipos eficientes
+        # 🧼 Conversão de colunas para tipos otimizados
         df['Codigo Representante'] = df['Codigo Representante'].astype(str).str.strip().str.lstrip("0").astype("category")
         df['Codigo Supervisor'] = df['Codigo Supervisor'].astype(str).str.strip().astype("category")
         df['Codigo Grupo Cliente'] = df['Codigo Grupo Cliente'].astype(str).str.upper().astype("category")
@@ -212,11 +203,11 @@ def carregar_dados_processados():
         df['Qtd Venda'] = pd.to_numeric(df['Qtd Venda'], errors='coerce').fillna(0).astype('int32')
         df['Vlr Venda'] = pd.to_numeric(df['Vlr Venda'], errors='coerce').fillna(0).astype('float32')
 
-        # Cálculo vetorizado sem apply
+        # 🧮 Preço Médio Produto
         df['Preço Médio Produto'] = df['Vlr Venda'] / df['Qtd Venda'].replace(0, pd.NA)
         df['Preço Médio Produto'] = df['Preço Médio Produto'].fillna(0).round(2)
 
-        # 🚨 Lógica de perfil
+        # 🔐 Filtro por código do representante
         codigo_representante = str(st.session_state.get('codigo_representante', '')).strip().lower().lstrip('0')
         if codigo_representante and codigo_representante != 'admin':
             df = df[df['Codigo Representante'] == codigo_representante]
