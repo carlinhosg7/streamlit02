@@ -1,0 +1,991 @@
+# ----------------------------
+# ✅ IMPORTS
+# ----------------------------
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+from datetime import datetime
+from fpdf import FPDF
+import tempfile
+import os
+from PIL import Image
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import accuracy_score
+import time
+import plotly.io as pio
+import kaleido  # força o loading do kaleido para evitar erro de exportação
+import unicodedata
+import numpy as np
+from docx import Document
+from docx.shared import Inches
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+import requests
+from io import BytesIO
+from docx.shared import RGBColor
+from docx.shared import Pt
+from docx.shared import RGBColor, Pt
+import gc
+
+
+
+pio.kaleido.scope.default_format = "png"
+
+# ----------------------------
+# ✅ CONFIGURAÇÃO INICIAL DA PÁGINA (PRIMEIRO COMANDO DO STREAMLIT)
+# ----------------------------
+st.set_page_config(
+    page_title="Dashboard Analítico",
+    page_icon="https://raw.githubusercontent.com/carlinhosg7/streamlit02/main/logo_kidy_icon.ico",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ----------------------------
+# 🔐 FUNÇÃO DE AUTENTICAÇÃO
+# ----------------------------
+def autenticar_usuario_excel(caminho_arquivo):
+    try:
+        df_usuarios = pd.read_excel(caminho_arquivo, engine="openpyxl")
+
+        # Normaliza os nomes das colunas
+        df_usuarios.columns = [
+            unicodedata.normalize('NFKD', col).encode('ascii', errors='ignore').decode('utf-8').strip().lower().replace(" ", "_")
+            for col in df_usuarios.columns
+        ]
+
+        # Converte os dados para string
+        df_usuarios['usuario'] = df_usuarios['usuario'].apply(lambda x: str(x).strip())
+        df_usuarios['senha'] = df_usuarios['senha'].astype(str).str.strip()
+
+        # Inicializa autenticação
+        st.session_state['autenticado'] = st.session_state.get('autenticado', False)
+
+        if not st.session_state['autenticado']:
+            with st.sidebar:
+                st.markdown("### 🔐 Login")
+                usuario = st.text_input("Usuário").strip()
+                senha = st.text_input("Senha", type="password").strip()
+
+                if st.button("Entrar"):
+                    if usuario in df_usuarios['usuario'].values:
+                        senha_valida = df_usuarios[df_usuarios['usuario'] == usuario]['senha'].values[0]
+                        if senha == senha_valida:
+                            st.session_state['autenticado'] = True
+                            st.session_state['codigo_representante'] = usuario
+                            st.success("✅ Login realizado com sucesso!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Senha incorreta.")
+        if not st.session_state['autenticado']:
+            st.stop()
+
+    except Exception as e:
+        st.error(f"Erro ao carregar planilha de autenticação: {e}")
+        st.stop()
+
+# ----------------------------
+# 🚀 AUTENTICAÇÃO
+# ----------------------------
+autenticar_usuario_excel("auth.xlsx")
+
+# ----------------------------
+# 🖼️ CARREGA LOGO DA KIDY A PARTIR DO GITHUB
+# ----------------------------
+from PIL import Image
+
+CAMINHO_LOGO_LOCAL = "C:/preditiva/streamlit02/logo_kidy.png"
+
+try:
+    logo_kidy = Image.open(CAMINHO_LOGO_LOCAL)
+except Exception as e:
+    logo_kidy = None
+    st.warning(f"⚠️ Não foi possível carregar a logo local: {e}")
+
+if logo_kidy:
+    st.sidebar.image(logo_kidy, width=100)
+    st.image(logo_kidy, width=150)
+
+# ----------------------------
+# 📊 TÍTULO E SIDEBAR
+# ----------------------------
+st.title("📊 Dashboard Analítico")
+st.sidebar.image(logo_kidy, width=100)
+st.sidebar.header("🔧 Filtros de Análise")
+
+
+# CSS CUSTOMIZADO
+def add_custom_css():
+    st.markdown("""
+        <style>
+        body {
+            background-color: #1e1e1e;
+            color: #ffffff;
+        }
+        .css-1d391kg {
+            background-color: #1e1e1e !important;
+        }
+        .block-container {
+            padding: 2rem;
+        }
+        div.stButton > button:first-child {
+            background-color: #E60012;
+            color: white;
+            border-radius: 8px;
+            height: 3em;
+            width: 100%;
+            font-weight: bold;
+            border: none;
+            transition: 0.3s;
+        }
+        div.stButton > button:first-child:hover {
+            background-color: #A3000B;
+        }
+        footer {visibility: hidden;}
+
+        /* Cards para métricas */
+        .metric-card {
+            background-color: #2d2d2d;
+            padding: 16px;
+            border-radius: 10px;
+            box-shadow: 1px 1px 8px rgba(0,0,0,0.3);
+            text-align: center;
+            margin-bottom: 8px;
+            border: 1px solid #fba72033;
+        }
+        .metric-label {
+            font-size: 13px;
+            color: #bbbbbb;
+        }
+        .metric-value {
+            font-size: 22px;
+            font-weight: bold;
+            color: #F7A400;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+add_custom_css()
+
+# LOGO KIDY (a partir do GitHub)
+from PIL import Image
+
+CAMINHO_LOGO = "C:/preditiva/streamlit02/logo_kidy.png"
+
+try:
+    logo_kidy = Image.open(CAMINHO_LOGO)
+    st.image(logo_kidy, width=150)
+except Exception as e:
+    st.warning(f"⚠️ Não foi possível carregar a logo local: {e}")
+
+
+
+# DICIONÁRIO MESES
+meses_portugues = {
+    1: 'Janeiro', 2: 'Fevereiro', 3: 'Março', 4: 'Abril',
+    5: 'Maio', 6: 'Junho', 7: 'Julho', 8: 'Agosto',
+    9: 'Setembro', 10: 'Outubro', 11: 'Novembro', 12: 'Dezembro'
+}
+
+## Caminho local dos arquivos
+CAMINHO_LOCAL = "C:/preditiva/streamlit02"
+
+# Lista de caminhos locais dos arquivos .parquet
+URLS_DADOS = [
+    f"{CAMINHO_LOCAL}/DADOS_PREDITIVA_1.parquet",
+    f"{CAMINHO_LOCAL}/DADOS_PREDITIVA_2.parquet",
+    f"{CAMINHO_LOCAL}/DADOS_PREDITIVA_3.parquet",
+    f"{CAMINHO_LOCAL}/DADOS_PREDITIVA_4.parquet",
+    f"{CAMINHO_LOCAL}/DADOS_PREDITIVA_5.parquet",
+    f"{CAMINHO_LOCAL}/DADOS_PREDITIVA_6.parquet"
+]
+
+import gc
+
+# ----------------------------
+# 🚀 CARREGAMENTO OTIMIZADO (4GB-friendly)
+# ----------------------------
+COLUNAS_NECESSARIAS = [
+    'Codigo Representante', 'Codigo Supervisor',
+    'Codigo Grupo Cliente', 'Codigo Cliente',
+    'Grupo Cliente', 'Razao Social', 'Linha',
+    'Data Cadastro', 'Data Ultima Compra',
+    'Qtd Venda', 'Vlr Venda'
+]
+
+@st.cache_resource  # evita pickle de DF gigante
+def carregar_dados_processados():
+    try:
+        dfs_filtrados = []
+        colunas_base = None
+
+        # código do usuário logado
+        cod_rep_login = str(st.session_state.get('codigo_representante', '')).strip()
+        eh_admin = (cod_rep_login.lower() == 'admin' or cod_rep_login == '')
+
+        # normalizações possíveis do login
+        login_digits = ''.join(ch for ch in cod_rep_login if ch.isdigit())
+        cod_norm = login_digits.lstrip('0') or login_digits or cod_rep_login
+        cand_str = {cod_rep_login, cod_norm}
+        cand_int = None
+        try:
+            cand_int = int(cod_norm) if cod_norm.isdigit() else None
+        except:
+            cand_int = None
+        cand_float = float(cand_int) if isinstance(cand_int, int) else None
+
+        for url in URLS_DADOS:
+            # 🔎 lê só as colunas necessárias
+            df_temp = pd.read_parquet(url, columns=COLUNAS_NECESSARIAS)
+
+            # 🪓 filtra por representante SEM converter a coluna toda
+            if not eh_admin and 'Codigo Representante' in df_temp.columns:
+                s = df_temp['Codigo Representante']
+                mask = pd.Series(False, index=s.index)
+
+                # objetos/strings
+                if s.dtype.kind in ('O', 'U', 'S') or str(s.dtype).startswith('string') or str(s.dtype).startswith('category'):
+                    mask |= s.isin(cand_str)
+                    # também tenta comparação sem zeros à esquerda usando .str.lstrip só onde necessário
+                    # aplica apenas nas linhas que ainda não bateram
+                    idx = (~mask) & s.notna()
+                    if idx.any():
+                        s_part = pd.Series(s[idx], dtype="string")
+                        mask.loc[idx] = s_part.str.strip().str.lstrip('0').isin({cod_norm})
+
+                # inteiros
+                if cand_int is not None and s.dtype.kind in ('i', 'u'):
+                    mask |= (s == cand_int)
+
+                # floats (ex.: 9902.0 em alguns exports)
+                if cand_float is not None and s.dtype.kind == 'f':
+                    mask |= (s == cand_float)
+
+                df_temp = df_temp[mask]
+                if df_temp.empty:
+                    del df_temp
+                    gc.collect()
+                    continue
+
+            # Valida esquema
+            if colunas_base is None:
+                colunas_base = df_temp.columns
+            elif not df_temp.columns.equals(colunas_base):
+                st.warning(f"⚠️ Estrutura diferente detectada no arquivo: {url}")
+                gc.collect()
+                continue
+
+            # ✅ Tipagem enxuta no pedaço (menos RAM no concat)
+            for col in ['Codigo Supervisor', 'Codigo Grupo Cliente', 'Codigo Cliente',
+                        'Grupo Cliente', 'Razao Social', 'Linha']:
+                if col in df_temp.columns:
+                    df_temp[col] = pd.Series(df_temp[col], dtype="string").str.strip()
+
+            for col in ['Data Cadastro', 'Data Ultima Compra']:
+                if col in df_temp.columns:
+                    df_temp[col] = pd.to_datetime(df_temp[col], errors='coerce')
+
+            if 'Qtd Venda' in df_temp.columns:
+                df_temp['Qtd Venda'] = pd.to_numeric(df_temp['Qtd Venda'], errors='coerce').fillna(0).astype('int32')
+            if 'Vlr Venda' in df_temp.columns:
+                df_temp['Vlr Venda'] = pd.to_numeric(df_temp['Vlr Venda'], errors='coerce').fillna(0).astype('float32')
+
+            dfs_filtrados.append(df_temp)
+            del df_temp
+            gc.collect()
+
+        if not dfs_filtrados:
+            return pd.DataFrame(columns=COLUNAS_NECESSARIAS)
+
+        # 🔗 concatena já enxuto
+        df = pd.concat(dfs_filtrados, ignore_index=True)
+        del dfs_filtrados
+        gc.collect()
+
+        # pós-normalizações leves
+        if 'Codigo Grupo Cliente' in df.columns:
+            df['Codigo Grupo Cliente'] = pd.Series(df['Codigo Grupo Cliente'], dtype="string").str.upper()
+        if 'Codigo Cliente' in df.columns:
+            df['Codigo Cliente'] = pd.Series(df['Codigo Cliente'], dtype="string").str.upper()
+
+        # categorias com baixa/ média cardinalidade
+        for c in ['Codigo Representante', 'Codigo Supervisor', 'Codigo Grupo Cliente',
+                  'Codigo Cliente', 'Grupo Cliente', 'Razao Social', 'Linha']:
+            if c in df.columns and df[c].nunique(dropna=True) <= 50000:
+                df[c] = df[c].astype('category')
+
+        # preço médio
+        if {'Vlr Venda', 'Qtd Venda'}.issubset(df.columns):
+            df['Preço Médio Produto'] = (
+                df['Vlr Venda'] / df['Qtd Venda'].replace(0, pd.NA)
+            ).fillna(0).round(2).astype('float32')
+
+        # mensagem de contexto
+        if eh_admin:
+            st.markdown("🟢 **Modo Admin: Visualizando todos os dados**")
+        else:
+            st.markdown(f"🆔 **Representante:** `{(cod_norm or cod_rep_login).upper()}`")
+
+        gc.collect()
+        return df
+
+    except Exception as e:
+        import traceback
+        st.error("❌ Erro ao carregar dados:")
+        st.code(traceback.format_exc())
+        return pd.DataFrame()
+
+
+# ----------------------------
+# 📥 CARREGA DADOS
+# ----------------------------
+df = carregar_dados_processados()
+
+if df.empty:
+    st.warning("⚠️ Sem dados para exibir com os filtros atuais.")
+    st.stop()
+
+# ----------------------------
+# 🔎 OPÇÕES FORMATADAS (mantidas)
+# ----------------------------
+opcoes_grupo_cliente = df[['Codigo Grupo Cliente', 'Grupo Cliente']].drop_duplicates()
+opcoes_grupo_cliente['Busca'] = (
+    opcoes_grupo_cliente['Codigo Grupo Cliente'].astype(str) + ' - ' +
+    opcoes_grupo_cliente['Grupo Cliente'].astype(str)
+)
+busca_grupo = st.sidebar.selectbox(
+    "🔍 Buscar Grupo Cliente:",
+    [''] + sorted(opcoes_grupo_cliente['Busca'].tolist())
+)
+
+opcoes_cliente = df[['Codigo Cliente', 'Razao Social']].drop_duplicates()
+opcoes_cliente['Busca'] = (
+    opcoes_cliente['Codigo Cliente'].astype(str) + ' - ' +
+    opcoes_cliente['Razao Social'].astype(str)
+)
+busca_cliente = st.sidebar.selectbox(
+    "🔍 Buscar Cliente:",
+    [''] + sorted(opcoes_cliente['Busca'].tolist())
+)
+
+# ----------------------------
+# 🧩 EXTRAÇÃO DE CÓDIGOS E PERÍODO
+# ----------------------------
+codigo_grupo_cliente = busca_grupo.split(' - ')[0].strip().upper() if busca_grupo else ''
+codigo_cliente = busca_cliente.split(' - ')[0].strip().upper() if busca_cliente else ''
+
+if 'Data Cadastro' in df.columns and df['Data Cadastro'].notna().any():
+    data_min = df['Data Cadastro'].min().date()
+    data_max = df['Data Cadastro'].max().date()
+else:
+    data_min = datetime(2000, 1, 1).date()
+    data_max = datetime.today().date()
+
+data_inicio_padrao = datetime(2024, 1, 1).date()
+data_fim_padrao = min(datetime.today().date(), data_max)
+
+periodo = st.sidebar.date_input(
+    "Período da análise:",
+    value=(data_inicio_padrao, data_fim_padrao),
+    min_value=data_min,
+    max_value=data_max
+)
+
+
+# BOTÃO
+if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
+
+    if not codigo_grupo_cliente and not codigo_cliente:
+        st.sidebar.warning("⚠️ Informe pelo menos um código!")
+    else:
+        with st.spinner('🔎 Analisando dados...'):
+
+            filtro_inicial = df
+
+            if codigo_cliente:
+                filtro_inicial = filtro_inicial.loc[filtro_inicial['Codigo Cliente'] == codigo_cliente]
+            elif codigo_grupo_cliente:
+                filtro_inicial = filtro_inicial.loc[filtro_inicial['Codigo Grupo Cliente'] == codigo_grupo_cliente]
+
+            dados_filtrados = filtro_inicial.loc[
+                (filtro_inicial['Data Cadastro'] >= pd.to_datetime(periodo[0])) &
+                (filtro_inicial['Data Cadastro'] <= pd.to_datetime(periodo[1]))
+            ]
+
+            if dados_filtrados.empty:
+                st.warning("⚠️ Nenhum dado encontrado no período!")
+            else:
+                dados_filtrados['Ano'] = dados_filtrados['Data Cadastro'].dt.year
+                nome_grupo = dados_filtrados['Grupo Cliente'].iloc[0]
+                total_lojas = dados_filtrados['Codigo Cliente'].nunique()
+                st.session_state["nome_cliente_para_arquivo"] = (
+                    nome_grupo.strip().upper().replace(" ", "_").replace("/", "_")
+                )
+
+
+                # Mapeamento dos supervisores
+                mapa_supervisores = {
+                    '9902': 'Centro Oeste',
+                    '9907': 'Sul',
+                    '9914': 'Norte / Nordeste',
+                    '9915': 'REM',
+                    '9916': 'SPC',
+                    '9917': 'SPI'
+                }
+
+                # Extrai representantes únicos do grupo selecionado nos dados filtrados
+                cods_representantes = dados_filtrados['Codigo Representante'].astype(str).dropna().unique()
+                cods_representantes = sorted(cods_representantes)
+                cods_repr_str = ', '.join(cods_representantes)
+
+                # 🔒 Salva o código do representante analisado para nome de arquivo
+                st.session_state["codigo_repr_para_arquivo"] = cods_representantes[0] if len(cods_representantes) == 1 else "_".join(cods_representantes)
+
+                # Extrai e limpa código(s) de supervisor
+                cod_supervisor = dados_filtrados['Codigo Supervisor'].astype(str).str.strip().dropna().unique()
+
+                # Verifica e exibe o nome do supervisor corretamente
+                if len(cod_supervisor) > 0:
+                    supervisor_id = str(cod_supervisor[0]).split('.')[0]
+                    nome_supervisor = mapa_supervisores.get(supervisor_id, f"Código {supervisor_id} não mapeado")
+                else:
+                    nome_supervisor = "Não informado"
+
+                # Exibe informações do grupo
+                st.markdown(
+                    f"## 📍 Grupo Cliente: {nome_grupo} | 🏬 Lojas: {total_lojas} | 🆔 Representante(s): {cods_repr_str}"
+                )
+                st.markdown(f"#### 🧑‍💼 Supervisor: {nome_supervisor}")
+
+            
+                # KPIs
+                ultima_data_compra = dados_filtrados['Data Ultima Compra'].max()
+                ultima_compra = ultima_data_compra.strftime('%d/%m/%Y') if pd.notnull(ultima_data_compra) else 'Sem compras'
+
+                primeira_data = dados_filtrados['Data Cadastro'].min()
+                ultima_data = dados_filtrados['Data Cadastro'].max()
+                periodo_analise = f"{primeira_data.strftime('%d/%m/%Y')} até {ultima_data.strftime('%d/%m/%Y')}"
+
+                vendas_totais = dados_filtrados['Qtd Venda'].sum()
+                melhor_mes_num = dados_filtrados['Data Cadastro'].dt.month.mode()[0]
+                melhor_mes_nome = meses_portugues.get(melhor_mes_num, 'Mês inválido')
+
+                col1, col2, col3 = st.columns(3)
+                for col, label, value in zip(
+                    [col1, col2, col3],
+                    ['📅 Última Compra', '🕒 Período da Análise', '📈 Melhor Mês para Oferta'],
+                    [ultima_compra, periodo_analise, melhor_mes_nome]
+                ):
+                    col.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-label">{label}</div>
+                            <div class="metric-value">{value}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+
+                st.success(f"📦 Total de Itens Vendidos: {vendas_totais:,} unidades")
+    ###################
+
+
+   ####################             
+                # --- ANÁLISE DAS 3 ÚLTIMAS COLEÇÕES (INCLUINDO VIGENTE) ---
+                #st.markdown("### 👟 Vendas das 3 Últimas Coleções (Pares e Valores)")
+
+                from datetime import datetime
+
+                # 🔁 Função para identificar a coleção com base na nova regra
+                def identificar_colecao(data):
+                    if pd.isnull(data):
+                        return None
+                    mes = data.month
+                    ano = data.year
+
+                    if 5 <= mes <= 10:  # Verão: maio a outubro
+                        return f"Verão {ano}"
+                    elif 11 <= mes <= 12:  # Inverno: novembro e dezembro → pertence ao ano seguinte
+                        return f"Inverno {ano + 1}"
+                    else:  # Inverno: janeiro a abril → permanece no mesmo ano
+                        return f"Inverno {ano}"
+
+                # 📆 Determina a coleção vigente com base na data atual
+                hoje = datetime.today()
+                mes = hoje.month
+                ano = hoje.year
+
+                if 5 <= mes <= 10:
+                    colecao_vigente = f"Verão {ano}"
+                elif 11 <= mes <= 12:
+                    colecao_vigente = f"Inverno {ano + 1}"
+                else:
+                    colecao_vigente = f"Inverno {ano}"
+                
+                # 🔧 Garante que os códigos batem corretamente para cliente individual
+                df['Codigo Cliente'] = df['Codigo Cliente'].astype(str).str.upper().str.strip()
+                codigo_cliente = codigo_cliente.strip().upper()
+
+                # 🔍 Reaplica o filtro por cliente, se estiver definido
+                if codigo_cliente:
+                    dados_filtrados = dados_filtrados[dados_filtrados['Codigo Cliente'].astype(str).str.upper().str.strip() == codigo_cliente.strip().upper()]
+
+
+
+
+
+                # Proteção contra dados ausentes
+                dados_filtrados = dados_filtrados[
+                    pd.notnull(dados_filtrados['Data Cadastro']) &
+                    pd.notnull(dados_filtrados['Qtd Venda']) &
+                    pd.notnull(dados_filtrados['Preço Médio Produto'])
+                ].copy()
+
+                # 👀 Diagnóstico do problema dos valores zerados
+                # st.write("🔍 Preço Médio Produto - Quantidade de nulos:", dados_filtrados['Preço Médio Produto'].isnull().sum())
+                # st.write("🔍 Preço Médio Produto - Valores únicos:", dados_filtrados['Preço Médio Produto'].unique())
+
+
+                # Converte corretamente
+                # 🔁 Recalcula preço médio e valor corrigido com fallback
+                dados_filtrados['Qtd Venda'] = pd.to_numeric(dados_filtrados['Qtd Venda'], errors='coerce').fillna(0)
+                dados_filtrados['Vlr Venda'] = pd.to_numeric(dados_filtrados['Vlr Venda'], errors='coerce').fillna(0)
+
+                # Remove registros negativos
+                dados_filtrados = dados_filtrados[
+                    (dados_filtrados['Qtd Venda'] >= 0) & (dados_filtrados['Vlr Venda'] >= 0)
+                ].copy()
+
+                # Preço médio calculado (referência)
+                dados_filtrados['Preço Médio Produto'] = dados_filtrados.apply(
+                    lambda row: row['Vlr Venda'] / row['Qtd Venda'] if row['Qtd Venda'] > 0 else 0,
+                    axis=1
+                ).round(2)
+
+                # 🔁 Recalcula campos com proteção total
+                dados_filtrados['Qtd Venda'] = pd.to_numeric(dados_filtrados['Qtd Venda'], errors='coerce').fillna(0)
+                dados_filtrados['Vlr Venda'] = pd.to_numeric(dados_filtrados['Vlr Venda'], errors='coerce').fillna(0)
+
+                # Remove valores inválidos
+                dados_filtrados = dados_filtrados[
+                    (dados_filtrados['Qtd Venda'] >= 0) & (dados_filtrados['Vlr Venda'] >= 0)
+                ].copy()
+
+                # Preço médio individual por linha (não usado no total, mas útil para verificação)
+                dados_filtrados['Preço Médio Produto'] = dados_filtrados.apply(
+                    lambda row: row['Vlr Venda'] / row['Qtd Venda'] if row['Qtd Venda'] > 0 else 0,
+                    axis=1
+                ).round(2)
+
+                # 🔍 Calcula média de preço por par com fallback se necessário
+                df_base_preco = dados_filtrados[
+                    (dados_filtrados['Qtd Venda'] > 0) & (dados_filtrados['Vlr Venda'] > 0)
+                ].copy()
+
+                if not df_base_preco.empty:
+                    media_preco_par = df_base_preco.apply(lambda row: row['Vlr Venda'] / row['Qtd Venda'], axis=1).mean()
+                else:
+                    media_preco_par = 60  # 🔧 Valor estimado padrão por par
+                    st.warning(f"⚠️ Nenhuma venda com valor encontrada. Estimativa padrão de R$ {media_preco_par:.2f} por par foi aplicada.")
+
+                # Valor de venda corrigido com fallback
+                dados_filtrados['Vlr Venda Corrigido'] = dados_filtrados.apply(
+                    lambda row: row['Vlr Venda'] if row['Vlr Venda'] > 0 else row['Qtd Venda'] * media_preco_par,
+                    axis=1
+                )
+
+                # Define coleção por regra
+                def identificar_colecao(data):
+                    if pd.isnull(data):
+                        return None
+                    mes = data.month
+                    ano = data.year
+                    if 5 <= mes <= 10:
+                        return f"Verão {ano}"
+                    elif mes >= 11:
+                        return f"Inverno {ano + 1}"
+                    else:
+                        return f"Inverno {ano}"
+
+                dados_filtrados['Colecao'] = dados_filtrados['Data Cadastro'].apply(identificar_colecao)
+
+                # Agrupamento por coleção
+                vendas_colecao = dados_filtrados.groupby('Colecao').agg({
+                    'Qtd Venda': 'sum',
+                    'Vlr Venda Corrigido': 'sum',
+                    'Data Cadastro': ['min', 'max']
+                }).reset_index()
+
+                vendas_colecao.columns = ['Colecao', 'Qtd Venda', 'Vlr Venda Corrigido', 'Data Inicial', 'Data Final']
+                vendas_colecao['Ano'] = vendas_colecao['Colecao'].str.extract(r'(\d{4})').astype(int)
+
+                # Garante coleção vigente
+                hoje = datetime.today()
+                mes = hoje.month
+                ano = hoje.year
+                colecao_vigente = f"Verão {ano}" if 5 <= mes <= 10 else f"Inverno {ano + 1}" if mes >= 11 else f"Inverno {ano}"
+
+                if colecao_vigente not in vendas_colecao['Colecao'].values:
+                    linha_vigente = pd.DataFrame({
+                        'Colecao': [colecao_vigente],
+                        'Qtd Venda': [0],
+                        'Vlr Venda Corrigido': [0.0],
+                        'Data Inicial': [hoje],
+                        'Data Final': [hoje],
+                        'Ano': [int(colecao_vigente.split()[1])]
+                    })
+                    vendas_colecao = pd.concat([linha_vigente, vendas_colecao], ignore_index=True)
+
+                # Últimas 3 coleções
+                colecoes_exibir = vendas_colecao.sort_values(by='Data Final', ascending=False).drop_duplicates('Colecao').head(3)
+
+                # Formatação final
+                colecoes_exibir['Pares Vendidos'] = colecoes_exibir['Qtd Venda'].fillna(0).astype(int)
+                colecoes_exibir['Valor Vendido (R$)'] = colecoes_exibir['Vlr Venda Corrigido'].fillna(0).apply(
+                    lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                )
+                colecoes_exibir['Período da Coleta'] = colecoes_exibir.apply(
+                    lambda row: (
+                        f"{row['Data Inicial'].strftime('%d/%m/%Y')} a {row['Data Final'].strftime('%d/%m/%Y')}"
+                        if pd.notnull(row['Data Inicial']) and pd.notnull(row['Data Final']) else "Período inválido"
+                    ),
+                    axis=1
+                )
+
+                # Exibe tabela
+                colecoes_exibir = colecoes_exibir[['Colecao', 'Pares Vendidos', 'Valor Vendido (R$)', 'Período da Coleta']]
+                colecoes_exibir.columns = ['Coleção', 'Pares Vendidos', 'Valor Vendido (R$)', 'Período da Coleta']
+                st.markdown("### 👟 Vendas das 3 Últimas Coleções (Pares e Valores)")
+                st.table(colecoes_exibir)
+
+                # Salva no session_state para PDF/Word
+                st.session_state["colecoes_exibir"] = colecoes_exibir
+#########
+                # ==========================
+                # 📆 Análise dos Últimos 12 Meses (Quantidade e Valor)
+                # ==========================
+
+                st.markdown("### 📆 Vendas dos Últimos 12 Meses")
+
+                # 🔁 Garante que a data está ok
+                dados_filtrados['AnoMes'] = dados_filtrados['Data Cadastro'].dt.to_period('M')
+                dados_filtrados['AnoMes'] = dados_filtrados['AnoMes'].dt.to_timestamp()
+
+                # 🔢 Agrupa por mês/ano
+                ultimos_12 = (
+                    dados_filtrados
+                    .groupby('AnoMes')
+                    .agg({
+                        'Qtd Venda': 'sum',
+                        'Vlr Venda Corrigido': 'sum'
+                    })
+                    .reset_index()
+                    .sort_values(by='AnoMes', ascending=False)
+                    .head(12)
+                    .sort_values(by='AnoMes')  # volta para ordem cronológica
+                )
+
+                # 📊 Formata os valores
+                ultimos_12['Mês/Ano'] = ultimos_12['AnoMes'].dt.strftime('%b/%Y')
+                ultimos_12['Pares Vendidos'] = ultimos_12['Qtd Venda'].astype(int)
+                ultimos_12['Valor Vendido (R$)'] = ultimos_12['Vlr Venda Corrigido'].apply(
+                    lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                )
+
+                # 🎯 Seleciona colunas finais
+                ultimos_12_meses_df = ultimos_12[['Mês/Ano', 'Pares Vendidos', 'Valor Vendido (R$)']]
+
+                # 💾 Salva no session_state para Word
+                st.session_state["ultimos_12_meses_df"] = ultimos_12_meses_df
+
+                # 🧾 Exibe
+                st.table(ultimos_12_meses_df)
+
+
+
+
+
+#########
+                # ======================
+                # 🧾 Comparativo de Linhas e Categorias - Não Compradas
+                # ======================
+                import unicodedata  # Para normalização dos nomes das colunas
+
+                st.markdown("## 🧾 Linhas e Categorias que o Cliente Ainda Não Comprou")
+
+               # 🔽 Carrega XLSX com todas as linhas possíveis válidas
+                # 🔽 Caminho local do arquivo Excel
+                CAMINHO_LINHAS_XLSX = "C:/preditiva/streamlit02/DADOS PREDITIVA LINHAS.xlsx"
+                linhas_validas = pd.read_excel(CAMINHO_LINHAS_XLSX, engine="openpyxl")
+
+
+                # 🧹 Normaliza nomes das colunas do XLSX
+                linhas_validas.columns = [
+                    unicodedata.normalize('NFKD', col).encode('ASCII', 'ignore').decode('utf-8').strip().lower().replace(" ", "_")
+                    for col in linhas_validas.columns
+                ]
+                linhas_validas = linhas_validas.drop_duplicates(subset=["linha"])
+
+                # ✅ Linhas compradas pelo cliente
+                linhas_compradas = dados_filtrados[dados_filtrados["Qtd Venda"] > 0]["Linha"].dropna().astype(str)
+                linhas_compradas = linhas_compradas.str.strip().str.upper().unique()
+
+                # 🔍 Padroniza colunas para comparação
+                linhas_validas['linha'] = linhas_validas['linha'].astype(str).str.strip().str.upper()
+                linhas_validas['codigo_linha'] = linhas_validas['codigo_linha'].astype(str).str.strip()
+
+                # 🔍 Seleciona as linhas ainda não compradas E válidas
+                linhas_nao_compradas = linhas_validas[~linhas_validas["linha"].isin(linhas_compradas)].copy()
+
+                # 🧠 Salva para uso futuro
+                st.session_state["linhas_nao_compradas"] = linhas_nao_compradas[["codigo_linha", "linha"]]
+
+
+                # ================
+                # 🔄 Categorias Não Compradas
+                # ================
+                try:
+                    CAMINHO_CATEGORIAS = "C:/preditiva/streamlit02/CATEGORIAS.csv"
+                    df_categorias = pd.read_csv(
+                        CAMINHO_CATEGORIAS,
+                        encoding="latin1",
+                        sep=";"
+                    )
+
+                except Exception as e:
+                    st.error(f"Erro ao carregar o arquivo CATEGORIAS.csv: {e}")
+                    st.stop()
+
+                # 🧹 Normaliza nomes das colunas
+                df_categorias.columns = [
+                    unicodedata.normalize('NFKD', col).encode('ASCII', 'ignore').decode('utf-8').strip().lower().replace(" ", "_")
+                    for col in df_categorias.columns
+                ]
+
+                # ✅ Verifica colunas obrigatórias
+                for col in ["categorias", "codigo_linha"]:
+                    if col not in df_categorias.columns:
+                        st.error(f"❌ A coluna '{col}' não foi encontrada no arquivo CATEGORIAS.csv.")
+                        st.stop()
+
+                # 🔧 Padroniza os valores
+                df_categorias['categorias'] = df_categorias['categorias'].astype(str).str.strip().str.upper()
+                df_categorias['codigo_linha'] = df_categorias['codigo_linha'].astype(str).str.strip()
+
+                # 🔗 Junta com as linhas não compradas
+                linhas_nao_compradas_merge = st.session_state["linhas_nao_compradas"].copy()
+                linhas_nao_compradas_merge['codigo_linha'] = linhas_nao_compradas_merge['codigo_linha'].astype(str).str.strip()
+
+                linhas_nao_compradas_categorias = pd.merge(
+                    linhas_nao_compradas_merge,
+                    df_categorias,
+                    on="codigo_linha",
+                    how="left"
+                )
+
+                # 🧽 Categorias únicas
+                categorias_nao_compradas = (
+                    linhas_nao_compradas_categorias[["categorias"]]
+                    .dropna()
+                    .drop_duplicates()
+                    .sort_values(by="categorias")
+                    .reset_index(drop=True)
+                )
+
+                # 🧠 Salva para uso no PDF
+                st.session_state["categorias_nao_compradas"] = categorias_nao_compradas
+
+                # ======================
+                # 📊 Exibição Lado a Lado
+                # ======================
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("### 📄 Linhas que o Cliente Ainda Não Comprou")
+                    if linhas_nao_compradas.empty:
+                        st.success("✅ O cliente comprou todas as linhas.")
+                    else:
+                        st.dataframe(linhas_nao_compradas[["codigo_linha", "linha"]].sort_values(by="linha"))
+
+                with col2:
+                    st.markdown("### 📑 Categorias que o Cliente Ainda Não Comprou")
+                    if categorias_nao_compradas.empty:
+                        st.success("✅ O cliente comprou todas as categorias.")
+                    else:
+                        st.dataframe(categorias_nao_compradas)
+
+                
+                
+                # 🔐 Salva tudo no session_state no final da análise
+                st.session_state["nome_grupo"] = nome_grupo
+                st.session_state["total_lojas"] = total_lojas
+                st.session_state["cods_repr_str"] = cods_repr_str
+                st.session_state["nome_supervisor"] = nome_supervisor
+                st.session_state["ultima_compra"] = ultima_compra
+                st.session_state["periodo_analise"] = periodo_analise
+                st.session_state["melhor_mes_nome"] = melhor_mes_nome
+                st.session_state["colecoes_exibir"] = colecoes_exibir
+                st.session_state["linhas_nao_compradas"] = linhas_nao_compradas
+                st.session_state["categorias_nao_compradas"] = categorias_nao_compradas
+                ultimos_12_meses_df = st.session_state.get("ultimos_12_meses_df", pd.DataFrame())
+                st.session_state["codigo_repr_para_arquivo"] = cods_representantes[0]
+
+
+                
+
+
+                st.session_state["linhas_nao_compradas"] = linhas_nao_compradas
+                st.session_state["categorias_nao_compradas"] = categorias_nao_compradas
+################
+
+from docx.shared import RGBColor, Pt, Inches
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+import tempfile
+from docx import Document
+
+# BOTÃO DE EXPORTAÇÃO PARA WORD
+if st.session_state.get("nome_grupo") and st.session_state.get("colecoes_exibir") is not None:
+
+    if st.button("📄 Exportar para Word"):
+
+        with st.spinner("✍️ Gerando documento Word..."):
+
+            # Recupera as variáveis do session_state
+            nome_grupo = st.session_state["nome_grupo"]
+            total_lojas = st.session_state["total_lojas"]
+            cods_repr_str = st.session_state["cods_repr_str"]
+            nome_supervisor = st.session_state["nome_supervisor"]
+            ultima_compra = st.session_state["ultima_compra"]
+            periodo_analise = st.session_state["periodo_analise"]
+            melhor_mes_nome = st.session_state["melhor_mes_nome"]
+            colecoes_exibir = st.session_state["colecoes_exibir"]
+            linhas_nao_compradas = st.session_state["linhas_nao_compradas"]
+            categorias_nao_compradas = st.session_state["categorias_nao_compradas"]
+
+            # ✅ Função para adicionar título com cor laranja
+            def add_heading_colorido(doc, texto, tamanho=14, cor=RGBColor(255, 102, 0)):
+                paragrafo = doc.add_paragraph()
+                paragrafo.style = None
+                run = paragrafo.add_run(texto)
+                run.font.bold = True
+                run.font.size = Pt(tamanho)
+                run.font.color.rgb = cor
+                paragrafo.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+
+            # Criação do documento Word
+            doc = Document()
+
+            paragrafo = doc.add_paragraph()
+            paragrafo.style = None  # remove Heading 1 azul do Word
+            run = paragrafo.add_run("Relatório Analítico - Kidy")
+            run.font.bold = True
+            run.font.size = Pt(18)  # Tamanho maior que os subtítulos
+            run.font.color.rgb = RGBColor(255, 102, 0)
+            paragrafo.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+
+            try:
+                doc.add_picture("logo_kidy.png", width=Inches(1.5))
+            except:
+                pass
+
+            doc.add_paragraph(f"📍 Grupo Cliente: {nome_grupo}")
+            doc.add_paragraph(f"🏬 Lojas: {total_lojas}")
+            doc.add_paragraph(f"🆔 Representante(s): {cods_repr_str}")
+            doc.add_paragraph(f"🧑‍💼 Supervisor: {nome_supervisor}")
+            doc.add_paragraph(f"📅 Última Compra: {ultima_compra}")
+            doc.add_paragraph(f"📊 Período da Análise: {periodo_analise}")
+            doc.add_paragraph(f"⭐ Melhor Mês para Oferta: {melhor_mes_nome}")
+
+            # Tabela de Coleções
+            add_heading_colorido(doc, "👟 Vendas das 3 Últimas Coleções")
+            tabela = doc.add_table(rows=1, cols=4)
+            hdr = tabela.rows[0].cells
+            hdr[0].text = 'Coleção'
+            hdr[1].text = 'Pares Vendidos'
+            hdr[2].text = 'Valor Vendido (R$)'
+            hdr[3].text = 'Período da Coleta'
+
+            for _, row in colecoes_exibir.iterrows():
+                linha = tabela.add_row().cells
+                linha[0].text = str(row['Coleção'])
+                linha[1].text = str(row['Pares Vendidos'])
+                linha[2].text = str(row['Valor Vendido (R$)'])
+                linha[3].text = str(row['Período da Coleta'])
+                
+                
+                # 🔢 Tabela dos Últimos 12 Meses
+                if "tabela_12_meses_adicionada" not in st.session_state:
+                    ultimos_12_meses_df = st.session_state.get("ultimos_12_meses_df", pd.DataFrame())
+
+                    if not ultimos_12_meses_df.empty:
+                        st.session_state["tabela_12_meses_adicionada"] = True
+
+                        add_heading_colorido(doc, "📆 Vendas dos Últimos 12 Meses")
+
+                        tabela_12 = doc.add_table(rows=1, cols=3)
+                        hdr = tabela_12.rows[0].cells
+                        hdr[0].text = 'Mês/Ano'
+                        hdr[1].text = 'Pares Vendidos'
+                        hdr[2].text = 'Valor Vendido (R$)'
+
+                        for _, row in ultimos_12_meses_df.iterrows():
+                            linha = tabela_12.add_row().cells
+                            linha[0].text = str(row['Mês/Ano'])
+                            linha[1].text = str(row['Pares Vendidos'])
+                            linha[2].text = str(row['Valor Vendido (R$)'])
+            # Tentativa automática de localizar os nomes certos
+            def encontrar_coluna(candidatos, colunas_df):
+                for c in candidatos:
+                    for col in colunas_df:
+                        if c.lower() in col.lower():
+                            return col
+                return None
+
+            # LINHAS NÃO COMPRADAS
+            add_heading_colorido(doc, "📄 Linhas que o Cliente Ainda Não Comprou")
+
+            if not linhas_nao_compradas.empty:
+                for _, row in linhas_nao_compradas.iterrows():
+                    codigo = str(row['codigo_linha'])
+                    nome = str(row['linha'])
+                    doc.add_paragraph(f"- {codigo} | {nome}")
+            else:
+                doc.add_paragraph("✅ O cliente comprou todas as linhas.")
+
+            # CATEGORIAS NÃO COMPRADAS
+            add_heading_colorido(doc, "📑 Categorias que o Cliente Ainda Não Comprou")
+
+            if not categorias_nao_compradas.empty:
+                for _, row in categorias_nao_compradas.iterrows():
+                    categoria = str(row['categorias'])
+                    doc.add_paragraph(f"- {categoria}")
+            else:
+                doc.add_paragraph("✅ O cliente comprou todas as categorias.")
+
+
+            # Exportação final
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+                doc.save(tmp.name)
+                tmp_path = tmp.name
+
+            codigo_repr_para_arquivo = (
+                st.session_state.get("codigo_repr_para_arquivo", "representante")
+                .replace(" ", "_")
+                .lower()
+            )
+
+            nome_cliente = st.session_state.get("nome_cliente_para_arquivo", "cliente")
+
+            file_name = f"{nome_cliente}_Rep_{codigo_repr_para_arquivo}.docx"
+
+            with open(tmp_path, "rb") as f:
+                st.download_button(
+                    label="📥 Baixar Relatório Word",
+                    data=f,
+                    file_name=file_name,
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+                    
+# RODAPÉ
+st.sidebar.markdown("---")
+st.sidebar.caption(f"Relatório gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+st.sidebar.markdown("Desenvolvido por Kidy Data Team 🚀")
