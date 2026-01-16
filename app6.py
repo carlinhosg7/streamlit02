@@ -577,35 +577,59 @@ if st.sidebar.button("🔎 Analisar Grupo/Cliente"):
                 # ======================
                 # 🧾 Comparativo de Linhas e Categorias - Não Compradas
                 # ======================
-                import unicodedata  # Para normalização dos nomes das colunas
+                import unicodedata
 
                 st.markdown("## 🧾 Linhas e Categorias que o Cliente Ainda Não Comprou")
 
-               # 🔽 Carrega XLSX com todas as linhas possíveis válidas
+                # 🔽 Carrega XLSX com todas as linhas possíveis válidas
                 URL_LINHAS_XLSX = "https://github.com/carlinhosg7/streamlit02/raw/main/DADOS%20PREDITIVA%20LINHAS.xlsx"
-                linhas_validas = pd.read_excel(URL_LINHAS_XLSX, engine="openpyxl")
 
-                # 🧹 Normaliza nomes das colunas do XLSX
-                linhas_validas.columns = [
-                    unicodedata.normalize('NFKD', col).encode('ASCII', 'ignore').decode('utf-8').strip().lower().replace(" ", "_")
-                    for col in linhas_validas.columns
-                ]
-                linhas_validas = linhas_validas.drop_duplicates(subset=["linha"])
+                try:
+                    linhas_validas = pd.read_excel(URL_LINHAS_XLSX, engine="openpyxl")
 
-                # ✅ Linhas compradas pelo cliente
-                linhas_compradas = dados_filtrados[dados_filtrados["Qtd Venda"] > 0]["Linha"].dropna().astype(str)
-                linhas_compradas = linhas_compradas.str.strip().str.upper().unique()
+                    # 🧹 1. Normaliza nomes das colunas do XLSX (Transforma "Linha" em "linha")
+                    linhas_validas.columns = [
+                        unicodedata.normalize('NFKD', col).encode('ASCII', 'ignore').decode('utf-8').strip().lower().replace(" ", "_")
+                        for col in linhas_validas.columns
+                    ]
+                    
+                    # Remove duplicatas no Excel
+                    linhas_validas = linhas_validas.drop_duplicates(subset=["linha"])
 
-                # 🔍 Padroniza colunas para comparação
-                linhas_validas['linha'] = linhas_validas['linha'].astype(str).str.strip().str.upper()
-                linhas_validas['codigo_linha'] = linhas_validas['codigo_linha'].astype(str).str.strip()
+                    # 🧹 2. Normaliza temporariamente os dados_filtrados para garantir a comparação
+                    # Criamos uma cópia para não estragar o resto do dashboard
+                    df_temp_filt = dados_filtrados.copy()
+                    df_temp_filt.columns = [
+                        unicodedata.normalize('NFKD', col).encode('ASCII', 'ignore').decode('utf-8').strip().lower().replace(" ", "_")
+                        for col in df_temp_filt.columns
+                    ]
 
-                # 🔍 Seleciona as linhas ainda não compradas E válidas
-                linhas_nao_compradas = linhas_validas[~linhas_validas["linha"].isin(linhas_compradas)].copy()
+                    # ✅ 3. Linhas compradas pelo cliente (Agora o campo "linha" existe em minúsculo aqui)
+                    # Verifica se a coluna 'qtd_venda' e 'linha' existem após normalização
+                    col_venda = "qtd_venda" if "qtd_venda" in df_temp_filt.columns else "qtd_venda" # ajuste se necessário
+                    
+                    linhas_compradas = df_temp_filt[df_temp_filt[col_venda] > 0]["linha"].dropna().astype(str)
+                    linhas_compradas = linhas_compradas.str.strip().str.upper().unique()
 
-                # 🧠 Salva para uso futuro
-                st.session_state["linhas_nao_compradas"] = linhas_nao_compradas[["codigo_linha", "linha"]]
+                    # 🔍 4. Padroniza colunas de linhas_validas para comparação (Tudo em UPPER)
+                    linhas_validas['linha'] = linhas_validas['linha'].astype(str).str.strip().str.upper()
+                    
+                    # Garante que 'codigo_linha' existe (no seu excel pode estar como 'codigo_linha' após o lower)
+                    if 'codigo_linha' in linhas_validas.columns:
+                        linhas_validas['codigo_linha'] = linhas_validas['codigo_linha'].astype(str).str.strip()
 
+                    # 🔍 5. Seleciona as linhas ainda não compradas
+                    linhas_nao_compradas = linhas_validas[~linhas_validas["linha"].isin(linhas_compradas)].copy()
+
+                    # 🧠 Exibe e Salva
+                    if not linhas_nao_compradas.empty:
+                        st.dataframe(linhas_nao_compradas[["codigo_linha", "linha"]].reset_index(drop=True), use_container_width=True)
+                        st.session_state["linhas_nao_compradas"] = linhas_nao_compradas[["codigo_linha", "linha"]]
+                    else:
+                        st.info("💡 O cliente já comprou todas as linhas disponíveis!")
+
+                except Exception as e:
+                    st.error(f"Erro ao processar comparativo de linhas: {e}")
 
                 # ================
                 # 🔄 Categorias Não Compradas
